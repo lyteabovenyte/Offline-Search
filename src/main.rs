@@ -31,7 +31,7 @@ impl<'a> Lexer<'a> {
         if self.content.len() == 0 {
             return None;
         }
-        if self.content[0].is_alphabetic() {
+        if self.content[0].is_alphanumeric() {
             // Collect characters until a non-alphabetic character is found
             let mut end = 0;
             for (i, &c) in self.content.iter().enumerate() {
@@ -73,6 +73,7 @@ fn read_entire_xml_file<P: AsRef<Path>>(file_path: P) -> io::Result<String> {
         match event {
             Ok(XmlEvent::Characters(text)) => {
                 content.push_str(&text); // append text to the content
+                content.push_str(" ");
             }
             Err(e) => {
                 eprintln!("ERROR: Error reading XML event: {}", e);
@@ -108,12 +109,10 @@ fn main() -> io::Result<()>{
     }
 
     let example = read_entire_xml_file("docs.gl/gl4/glBlendColor.xhtml")?.chars().collect::<Vec<_>>();
-    println!("{:?}", example);
-    
-    for token in Lexer::new(&example) {
-        println!("{:?}", token);
+    let mut lexer = Lexer::new(&example);
+    while let Some(token) = lexer.next() {
+        println!("{token}", token = token.iter().collect::<String>());
     }
-    // Here you would use the lexer to process the content
     Ok(())
 
 }
