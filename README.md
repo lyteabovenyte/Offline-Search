@@ -15,6 +15,8 @@ OfflineSearch is a robust, open-source search engine built in Rust, inspired by 
 <div align="center"><h3>Why OfflineSearch?</h3></div>
 In many parts of the world, like Iran, internet access is often disrupted, leaving individuals, students, and professionals cut off from critical information. OfflineSearch addresses this challenge by bringing the power of a search engine to your local machine. Imagine having a personal archive of downloaded web pages, academic papers, and code repositories, all searchable with precision, even during internet outages. OfflineSearch is not just a tool—it's a lifeline for knowledge access in uncertain times.
 
+<br />
+
 ✅ **Relevance-Driven**: Uses advanced indexing and ranking algorithms inspired by early search engines to deliver the most relevant results.
 
 ✅ **Offline-First**: Works entirely on your local machine, ensuring access to your resources anytime, anywhere.
