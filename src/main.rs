@@ -6,7 +6,7 @@ use xml::reader::{EventReader, XmlEvent};
 use std::collections::HashMap;
 
 struct Lexer<'a> {
-    content: &'a [char] ,
+    content: &'a [char],
 }
 
 impl<'a> Lexer<'a> {
@@ -14,10 +14,48 @@ impl<'a> Lexer<'a> {
         Self { content }
     }
 
-    fn next_token(&mut self) -> Option<String> {
-        // Implement the logic to return the next token from the content
-        // For now, we will return None to indicate no more tokens
-        None
+    fn trim_left(&mut self) {
+        // This function trims the left side of the content until a non-whitespace character is found
+        while let Some(&c) = self.content.first() {
+            if c.is_whitespace() {
+                self.content = &self.content[1..]; // skip whitespace
+            } else {
+                break; // stop when a non-whitespace character is found
+            }
+        }
+    }
+
+    // Re-sliceing the content to avoid borrowing issues
+    fn next_token(&mut self) -> Option<&'a [char]> {
+        self.trim_left(); // ensure we start with non-whitespace content
+        if self.content.len() == 0 {
+            return None;
+        }
+        if self.content[0].is_alphabetic() {
+            // Collect characters until a non-alphabetic character is found
+            let mut end = 0;
+            for (i, &c) in self.content.iter().enumerate() {
+                if !c.is_alphanumeric() {
+                    end = i;
+                    break;
+                }
+            }
+            let token = &self.content[..end];
+            self.content = &self.content[end..]; // update content to the remaining part
+            Some(token)
+        } else {
+            // If the first character is not alphanumeric, skip it and continue
+            self.content = &self.content[1..];
+            self.next_token() // recursively call to find the next token
+        }
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = &'a [char];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_token()
     }
 }
 
@@ -42,7 +80,7 @@ fn read_entire_xml_file<P: AsRef<Path>>(file_path: P) -> io::Result<String> {
             }
             _ => {} // ignore other events
         }
-    }
+    } 
 
     Ok(content)
 }
@@ -72,7 +110,9 @@ fn main() -> io::Result<()>{
     let example = read_entire_xml_file("docs.gl/gl4/glBlendColor.xhtml")?.chars().collect::<Vec<_>>();
     println!("{:?}", example);
     
-    let lex = Lexer::new(&example);
+    for token in Lexer::new(&example) {
+        println!("{:?}", token);
+    }
     // Here you would use the lexer to process the content
     Ok(())
 
