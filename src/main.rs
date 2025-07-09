@@ -1,9 +1,9 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read};
-use std::process;
 use std::path::Path;
+use std::process;
 use xml::reader::{EventReader, XmlEvent};
-use std::collections::HashMap;
 
 struct Lexer<'a> {
     content: &'a [char],
@@ -63,7 +63,7 @@ fn index_document(_doc_content: &str) -> HashMap<String, usize> {
     todo!("Implement the indexing logic here -> a hashmap of terms to their frequencies");
 }
 
-fn read_entire_xml_file<P: AsRef<Path>>(file_path: P) -> io::Result<String> {
+fn read_entire_xml_file(file_path: &Path) -> io::Result<String> {
     let file = File::open(file_path)?;
     let er = EventReader::new(file);
 
@@ -81,15 +81,18 @@ fn read_entire_xml_file<P: AsRef<Path>>(file_path: P) -> io::Result<String> {
             }
             _ => {} // ignore other events
         }
-    } 
+    }
 
     Ok(content)
 }
 
-fn main() -> io::Result<()>{
+fn main() -> io::Result<()> {
     let dir_path = "docs.gl/gl4";
     if !fs::metadata(dir_path).is_ok() {
-        eprintln!("ERROR: Directory {} does not exist or is not accessible.", dir_path);
+        eprintln!(
+            "ERROR: Directory {} does not exist or is not accessible.",
+            dir_path
+        );
         process::exit(1);
     }
     let dir = fs::read_dir(dir_path).unwrap_or_else(|err| {
@@ -99,20 +102,28 @@ fn main() -> io::Result<()>{
 
     for file in dir {
         let file_path = file?.path();
-        let content = read_entire_xml_file(file_path.to_str().unwrap()).unwrap_or_else(|err| {
-            eprintln!("ERROR: Error in reading file {:?}: {}", file_path, err);
-            process::exit(1);
-        });
-        // Here you would call index_document(content) to index the content
+        let file_path = file_path.as_path();
+        let content = read_entire_xml_file(file_path)?.chars().collect::<Vec<_>>();
 
-        // println!("the size of {}: {}", file_path.display(), content.len());
+        let mut tf: HashMap<String, usize> = HashMap::new(); // frequency table for terms.
+        for token in Lexer::new(&content) {
+            let term = token
+                .iter()
+                .map(|c| c.to_ascii_uppercase())
+                .collect::<String>();
+            *tf.entry(term).or_insert(0) += 1;
+        }
+
+        let mut tf_sorted: Vec<_> = tf.iter().collect::<Vec<_>>();
+        tf_sorted.sort_by_key(|(_, f)| *f);
+        tf_sorted.reverse(); // Sort in descending order of frequency
+
+        println!("{file_path:?} term frequencies:");
+        println!("---------------------");
+        for (t, f) in tf_sorted.iter().take(10) {
+            println!("\t\t{}: {}", t, f);
+        }
     }
 
-    let example = read_entire_xml_file("docs.gl/gl4/glBlendColor.xhtml")?.chars().collect::<Vec<_>>();
-    let mut lexer = Lexer::new(&example);
-    while let Some(token) = lexer.next() {
-        println!("{token}", token = token.iter().collect::<String>());
-    }
     Ok(())
-
 }
