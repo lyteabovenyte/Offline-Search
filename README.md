@@ -1,5 +1,3 @@
-## **OfflineSearch**: A Rust-Powered Offline Search Engine
-
 <div align="center">
 
 <h3>🌍 Empowering Knowledge Access, Even Without the Internet 🌍</h3>
