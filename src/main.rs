@@ -155,19 +155,27 @@ fn save_tf_index(tf_index: TermFreqIndex, index_path: &str) -> Result<(), ()> {
     Ok(())
 }
 
-fn tf_index_of_folder(dir_path: &str) -> Result<TermFreqIndex, ()> {
+fn tf_index_of_folder(dir_path: &Path, tf_index: &mut TermFreqIndex) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
-        eprintln!("ERROR: could not open directory {dir_path}: {err}");
+        eprintln!("ERROR: could not open directory {dir_path:?}: {err}");
     })?;
 
-    let mut tf_index = TermFreqIndex::new();
-
     'next_file: for file in dir {
-        let file_path = file
-            .map_err(|err| {
-                eprintln!("ERROR: could not read file in directory {dir_path} due to: {err}");
-            })?
-            .path();
+        let file = file.map_err(|err| {
+            eprintln!("ERROR: could not read next file in directory {dir_path} during indexing: {err}",
+                      dir_path = dir_path.display());
+        })?;
+
+        let file_path = file.path();
+
+        let file_type = file.file_type().map_err(|err| {
+            eprintln!("ERROR: could not determine the type of the file {file:?}: {err:?}");
+        })?;
+
+        if file_type.is_dir() {
+            tf_index_of_folder(&file_path, tf_index)?;
+            continue 'next_file;
+        }
 
         println!("⚒️ Indexing {file_path:?}");
 
@@ -186,13 +194,9 @@ fn tf_index_of_folder(dir_path: &str) -> Result<TermFreqIndex, ()> {
             *tf.entry(term).or_insert(0) += 1;
         }
 
-        let mut tf_sorted = tf.iter().collect::<Vec<_>>();
-        tf_sorted.sort_by_key(|(_, f)| *f);
-        tf_sorted.reverse();
-
         tf_index.insert(file_path, tf);
     }
-    Ok(tf_index)
+    Ok(())
 }
 
 fn usage(program: &str) {
@@ -222,7 +226,8 @@ fn entry() -> Result<(), ()> {
                 usage(&program);
             })?;
 
-            let tf_index = tf_index_of_folder(&dir_path)?;
+            let mut tf_index= TermFreqIndex::new();
+            tf_index_of_folder(Path::new(&dir_path), &mut tf_index)?;
             save_tf_index(tf_index, "index.json")?;
         }
         "search" => {
