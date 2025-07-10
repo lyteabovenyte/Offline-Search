@@ -8,6 +8,7 @@ use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
 
 use serde_json;
+use tiny_http::{Response, Server};
 
 /// TermFreq is the term to frequency table for each file.
 type TermFreq = HashMap<String, usize>;
@@ -65,33 +66,6 @@ impl<'a> Lexer<'a> {
 
         return Some(self.chop(1));
     }
-
-    /*
-    // Re-sliceing the content to avoid borrowing issues
-    fn next_token(&mut self) -> Option<&'a [char]> {
-        self.trim_left(); // ensure we start with non-whitespace content
-        if self.content.len() == 0 {
-            return None;
-        }
-        if self.content[0].is_alphanumeric() {
-            // Collect characters until a non-alphabetic character is found
-            let mut end = 0;
-            for (i, &c) in self.content.iter().enumerate() {
-                if !c.is_alphanumeric() {
-                    end = i;
-                    break;
-                }
-            }
-            let token = &self.content[..end];
-            self.content = &self.content[end..]; // update content to the remaining part
-            Some(token)
-        } else {
-            // If the first character is not alphanumeric, skip it and continue
-            self.content = &self.content[1..];
-            self.next_token() // recursively call to find the next token
-        }
-    }
-    */
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -162,8 +136,10 @@ fn tf_index_of_folder(dir_path: &Path, tf_index: &mut TermFreqIndex) -> Result<(
 
     'next_file: for file in dir {
         let file = file.map_err(|err| {
-            eprintln!("ERROR: could not read next file in directory {dir_path} during indexing: {err}",
-                      dir_path = dir_path.display());
+            eprintln!(
+                "ERROR: could not read next file in directory {dir_path} during indexing: {err}",
+                dir_path = dir_path.display()
+            );
         })?;
 
         let file_path = file.path();
@@ -206,8 +182,9 @@ fn usage(program: &str) {
         "    index <folder>         index the <folder> and save the index to index.json file"
     );
     eprintln!(
-        "    search <index-file>    check how many documents are indexed in the file (searching is not implemented yet)"
+        "    search <index-file>     check how many documents are indexed in the file (searching is not implemented yet)"
     );
+    eprintln!("    serve [address]        start local HTTP server with Web Interface");
 }
 
 fn entry() -> Result<(), ()> {
@@ -226,7 +203,7 @@ fn entry() -> Result<(), ()> {
                 usage(&program);
             })?;
 
-            let mut tf_index= TermFreqIndex::new();
+            let mut tf_index = TermFreqIndex::new();
             tf_index_of_folder(Path::new(&dir_path), &mut tf_index)?;
             save_tf_index(tf_index, "index.json")?;
         }
@@ -237,6 +214,23 @@ fn entry() -> Result<(), ()> {
             })?;
 
             check_index(&index_path)?;
+        }
+        "serve" => {
+            let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
+            let server = Server::http(&address).map_err(|err| {
+                eprintln!("ERROR: could not start the HTTP server at {address}: {err}");
+            })?;
+
+            println!("👂 INFO: Listening at http://{address}");
+            
+            for request in server.incoming_requests() {
+                println!("📞 Received Incoming request.  method: {}, url: {}", request.method(), request.url());
+                let response = Response::from_string("hello request.");
+                // we won't stop at errors. handling other requests in a loop.
+                request.respond(response).unwrap_or_else(|err| {
+                    eprintln!("ERROR: could not respond to the request: {err}");
+                });
+            }
         }
         _ => {
             println!("ERROR: unknown subcommand {subcommand}");
