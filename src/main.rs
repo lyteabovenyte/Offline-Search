@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use xml::reader::{EventReader, XmlEvent};
 use std::env;
+use xml::common::{Position, TextPosition};
 
 use serde_json;
 
@@ -73,27 +74,27 @@ fn index_document(_doc_content: &str) -> HashMap<String, usize> {
     todo!("Implement the indexing logic here -> a hashmap of terms to their frequencies");
 }
 
-fn read_entire_xml_file(file_path: &Path) -> io::Result<String> {
-    let file = File::open(file_path)?;
+fn read_entire_xml_file(file_path: &Path) -> Option<String> {
+    let file = File::open(file_path).map_err(|err| {
+        eprintln!("ERROR: could not open {}: {err}", file_path.display());
+    }).ok()?;
     let er = EventReader::new(file);
 
     let mut content = String::new(); // buffer to hold the content
 
     for event in er.into_iter() {
-        match event {
-            Ok(XmlEvent::Characters(text)) => {
-                content.push_str(&text); // append text to the content
-                content.push_str(" ");
-            }
-            Err(e) => {
-                eprintln!("ERROR: Error reading XML event: {}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, "XML parsing error"));
-            }
-            _ => {} // ignore other events
+        let event = event.map_err(|err| {
+            let TextPosition {row, column} = err.position();
+            let msg = err.msg();
+            eprintln!("{file_path}:{row}:{column}: ERROR: {msg}", file_path = file_path.display());
+        }).ok()?;
+
+        if let XmlEvent::Characters(text) = event {
+            content.push_str(&text);
+            content.push_str(" ");
         }
     }
-
-    Ok(content)
+    Some(content)
 }
 
 fn check_index(index_path: &str) -> io::Result<()> {
@@ -101,7 +102,7 @@ fn check_index(index_path: &str) -> io::Result<()> {
     println!("🤓 Reading index file ...");
     let tf_index: TermFreqIndex = serde_json::from_reader(&index_file).unwrap_or_else(|err| {
         eprintln!("ERROR: Serde couldn't open the index file to read from: {err}");
-        println!("❗️returning empty index due to error in opening index file to read.");
+        println!("returning empty index due to error in opening index file to read.");
         return TermFreqIndex::new() // returning an empty index.
     });
     println!("{index_path:?} contains {count:?} files.", count = tf_index.len());
@@ -123,9 +124,12 @@ fn index_folder(dir_path: &str) -> io::Result<()> {
 
     let mut tf_index = TermFreqIndex::new();
 
-    for file in dir {
+    'next_file: for file in dir {
         let file_path = file?.path();
-        let content = read_entire_xml_file(&file_path)?.chars().collect::<Vec<_>>();
+        let content = match read_entire_xml_file(&file_path) {
+            Some(content) => content.chars().collect::<Vec<_>>(),
+            None => continue 'next_file,
+        };
 
         let mut tf = TermFreq::new(); // frequency table for terms.
         
@@ -143,13 +147,7 @@ fn index_folder(dir_path: &str) -> io::Result<()> {
         tf_sorted.reverse(); // Sort in descending order of frequency
 
         println!("⚒️ Indexing {:?} ...", file_path);
-        tf_index.insert(file_path.clone(), tf.clone());
-
-        // println!("{} term frequencies:", file_path.display());
-        // println!("---------------------");
-        // for (t, f) in tf_sorted.iter().take(10) {
-        //     println!("\t\t{}: {}", t, f);
-        // }
+        tf_index.insert(file_path, tf);
     }
 
     let index_path = "index.json";
@@ -168,7 +166,7 @@ fn main() {
     let _program = args.next().expect("path to program is provided");
 
     let subcommand = args.next().unwrap_or_else(|| {
-        println!("‼️ ERROR: no subcommand is provided\n\tsubcommands are:\n \t <search>\n \t <index>");
+        println!("ERROR: no subcommand is provided\n\tsubcommands are:\n \t <search>\n \t <index>");
         process::exit(1)
     });
 
