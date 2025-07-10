@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process;
-use xml::reader::{EventReader, XmlEvent};
 use std::env;
-use xml::common::{Position, TextPosition};
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::result::Result;
+use xml::common::{Position, TextPosition};
+use xml::reader::{EventReader, XmlEvent};
 
 use serde_json;
 
@@ -28,15 +27,46 @@ impl<'a> Lexer<'a> {
 
     fn trim_left(&mut self) {
         // This function trims the left side of the content until a non-whitespace character is found
-        while let Some(&c) = self.content.first() {
-            if c.is_whitespace() {
-                self.content = &self.content[1..]; // skip whitespace
-            } else {
-                break; // stop when a non-whitespace character is found
-            }
+        while !self.content.is_empty() && self.content[0].is_whitespace() {
+            self.content = &self.content[1..];
         }
     }
 
+    fn chop(&mut self, n: usize) -> &'a [char] {
+        let token = &self.content[0..n];
+        self.content = &self.content[n..];
+        token
+    }
+
+    fn chop_while<P>(&mut self, mut predicate: P) -> &'a [char]
+    where
+        P: FnMut(&char) -> bool,
+    {
+        let mut n = 0;
+        while n < self.content.len() && predicate(&self.content[n]) {
+            n += 1;
+        }
+        self.chop(n)
+    }
+
+    fn next_token(&mut self) -> Option<&'a [char]> {
+        self.trim_left();
+        if self.content.is_empty() {
+            return None;
+        }
+
+        if self.content[0].is_numeric() {
+            return Some(self.chop_while(|x| x.is_numeric()));
+        }
+
+        if self.content[0].is_alphabetic() {
+            return Some(self.chop_while(|x| x.is_alphanumeric()));
+        }
+
+        return Some(self.chop(1));
+    }
+
+    /*
     // Re-sliceing the content to avoid borrowing issues
     fn next_token(&mut self) -> Option<&'a [char]> {
         self.trim_left(); // ensure we start with non-whitespace content
@@ -61,6 +91,7 @@ impl<'a> Lexer<'a> {
             self.next_token() // recursively call to find the next token
         }
     }
+    */
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -81,14 +112,17 @@ fn read_entire_xml_file(file_path: &Path) -> Result<String, ()> {
 
     for event in er.into_iter() {
         let event = event.map_err(|err| {
-            let TextPosition {row, column} = err.position();
+            let TextPosition { row, column } = err.position();
             let msg = err.msg();
-            eprintln!("{file_path}:{row}:{column}: ERROR: {msg}", file_path = file_path.display());
+            eprintln!(
+                "{file_path}:{row}:{column}: ERROR: {msg}",
+                file_path = file_path.display()
+            );
         })?;
 
         if let XmlEvent::Characters(text) = event {
             content.push_str(&text);
-            content.push_str(" ");
+            content.push(' ');
         }
     }
     Ok(content)
@@ -102,13 +136,16 @@ fn check_index(index_path: &str) -> Result<(), ()> {
     let tf_index: TermFreqIndex = serde_json::from_reader(index_file).map_err(|err| {
         eprintln!("ERROR: could not parse index file: {err}");
     })?;
-    println!("{index_path} contains {count} files", count = tf_index.len());
+    println!(
+        "{index_path} contains {count} files",
+        count = tf_index.len()
+    );
     Ok(())
 }
 
 fn save_tf_index(tf_index: TermFreqIndex, index_path: &str) -> Result<(), ()> {
     println!("🛟 Saving index at {index_path}");
-    let index_file= File::create(index_path).map_err(|err| {
+    let index_file = File::create(index_path).map_err(|err| {
         eprintln!("ERROR: could not create the index file at {index_path}: {err}");
     })?;
 
@@ -118,18 +155,19 @@ fn save_tf_index(tf_index: TermFreqIndex, index_path: &str) -> Result<(), ()> {
     Ok(())
 }
 
-
 fn tf_index_of_folder(dir_path: &str) -> Result<TermFreqIndex, ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
         eprintln!("ERROR: could not open directory {dir_path}: {err}");
     })?;
-    
+
     let mut tf_index = TermFreqIndex::new();
 
     'next_file: for file in dir {
-        let file_path = file.map_err(|err| {
-            eprintln!("ERROR: could not read file in directory {dir_path} due to: {err}");
-        })?.path();
+        let file_path = file
+            .map_err(|err| {
+                eprintln!("ERROR: could not read file in directory {dir_path} due to: {err}");
+            })?
+            .path();
 
         println!("⚒️ Indexing {file_path:?}");
 
@@ -141,7 +179,10 @@ fn tf_index_of_folder(dir_path: &str) -> Result<TermFreqIndex, ()> {
         let mut tf = TermFreq::new();
 
         for token in Lexer::new(&content) {
-            let term = token.iter().map(|x| x.to_ascii_uppercase()).collect::<String>();
+            let term = token
+                .iter()
+                .map(|x| x.to_ascii_uppercase())
+                .collect::<String>();
             *tf.entry(term).or_insert(0) += 1;
         }
 
@@ -150,16 +191,27 @@ fn tf_index_of_folder(dir_path: &str) -> Result<TermFreqIndex, ()> {
         tf_sorted.reverse();
 
         tf_index.insert(file_path, tf);
-
     }
     Ok(tf_index)
 }
 
-fn main() -> Result<(), ()>{
+fn usage(program: &str) {
+    eprintln!("Usage: {program} [SUBCOMMAND] [OPTIONS]");
+    eprintln!("Subcommands:");
+    eprintln!(
+        "    index <folder>         index the <folder> and save the index to index.json file"
+    );
+    eprintln!(
+        "    search <index-file>    check how many documents are indexed in the file (searching is not implemented yet)"
+    );
+}
+
+fn entry() -> Result<(), ()> {
     let mut args = env::args();
-    let _program = args.next().expect("path to program is provided");
+    let program = args.next().expect("path to program is provided");
 
     let subcommand = args.next().ok_or_else(|| {
+        usage(&program);
         println!("ERROR: no subcommand is provided");
     })?;
 
@@ -167,22 +219,31 @@ fn main() -> Result<(), ()>{
         "index" => {
             let dir_path = args.next().ok_or_else(|| {
                 eprintln!("ERROR: no directory is provided for the {subcommand} subcommand.");
+                usage(&program);
             })?;
 
             let tf_index = tf_index_of_folder(&dir_path)?;
             save_tf_index(tf_index, "index.json")?;
-        },
+        }
         "search" => {
             let index_path = args.next().ok_or_else(|| {
                 eprintln!("ERROR: no path to index is provided for {subcommand} subcommand");
+                usage(&program);
             })?;
 
             check_index(&index_path)?;
         }
         _ => {
             println!("ERROR: unknown subcommand {subcommand}");
-            return Err(())
+            return Err(());
         }
     }
     Ok(())
+}
+
+fn main() -> ExitCode {
+    match entry() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(()) => ExitCode::FAILURE,
+    }
 }
