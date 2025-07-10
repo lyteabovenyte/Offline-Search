@@ -96,6 +96,19 @@ fn read_entire_xml_file(file_path: &Path) -> io::Result<String> {
 }
 
 fn main() -> io::Result<()> {
+    let index_path = "index.json";
+    let index_file = File::open(index_path)?;
+    println!("🤓 Reading index file ...");
+    let tf_index: TermFreqIndex = serde_json::from_reader(&index_file).unwrap_or_else(|err| {
+        eprintln!("ERROR: Serde couldn't open the index file to read from: {err}");
+        println!("❗️returning empty index due to error in opening index file to read.");
+        return TermFreqIndex::new() // returning an empty index.
+    });
+    println!("{index_path:?} contains {count:?} files.", count = tf_index.len());
+    Ok(())
+}
+
+fn main2() -> io::Result<()> {
     let dir_path = "docs.gl/gl4";
     if !fs::metadata(dir_path).is_ok() {
         eprintln!(
@@ -130,7 +143,7 @@ fn main() -> io::Result<()> {
         tf_sorted.sort_by_key(|(_, f)| *f);
         tf_sorted.reverse(); // Sort in descending order of frequency
 
-        println!("⚒️ Indexing {:?}", file_path);
+        println!("⚒️ Indexing {:?} ...", file_path);
         tf_index.insert(file_path.clone(), tf.clone());
 
         // println!("{} term frequencies:", file_path.display());
@@ -141,12 +154,12 @@ fn main() -> io::Result<()> {
     }
 
     let index_path = "index.json";
-    println!("⚒️ creating index at {index_path:?}");
+    println!("⚒️ creating index at {index_path:?} ...");
     let index_file = File::create(index_path)?;
     serde_json::to_writer(index_file, &tf_index).unwrap_or_else(|err| {
-        eprintln!("ERROR: serder couldn't open the index file: {}", err)
+        eprintln!("ERROR: serder couldn't open the index file to write: {}", err)
     });
-    println!("✅ write completed to the index file");
+    println!("✍️ write completed to the index file.");
 
     Ok(())
 }
