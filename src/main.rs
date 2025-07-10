@@ -70,10 +70,6 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
-fn index_document(_doc_content: &str) -> HashMap<String, usize> {
-    todo!("Implement the indexing logic here -> a hashmap of terms to their frequencies");
-}
-
 fn read_entire_xml_file(file_path: &Path) -> Option<String> {
     let file = File::open(file_path).map_err(|err| {
         eprintln!("ERROR: could not open {}: {err}", file_path.display());
