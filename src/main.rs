@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 use xml::reader::{EventReader, XmlEvent};
 
+use serde_json::Result;
+
 /// TermFreq is the term to frequency table for each file.
 type TermFreq = HashMap<String, usize>;
 
@@ -107,12 +109,14 @@ fn main() -> io::Result<()> {
         process::exit(1);
     });
 
+    let mut tf_index = TermFreqIndex::new();
+
     for file in dir {
         let file_path = file?.path();
         let content = read_entire_xml_file(&file_path)?.chars().collect::<Vec<_>>();
 
         let mut tf = TermFreq::new(); // frequency table for terms.
-        let mut tf_index = TermFreqIndex::new();
+        
 
         for token in Lexer::new(&content) {
             let term = token
@@ -126,14 +130,23 @@ fn main() -> io::Result<()> {
         tf_sorted.sort_by_key(|(_, f)| *f);
         tf_sorted.reverse(); // Sort in descending order of frequency
 
+        println!("⚒️ Indexing {:?}", file_path);
         tf_index.insert(file_path.clone(), tf.clone());
 
-        println!("{} term frequencies:", file_path.display());
-        println!("---------------------");
-        for (t, f) in tf_sorted.iter().take(10) {
-            println!("\t\t{}: {}", t, f);
-        }
+        // println!("{} term frequencies:", file_path.display());
+        // println!("---------------------");
+        // for (t, f) in tf_sorted.iter().take(10) {
+        //     println!("\t\t{}: {}", t, f);
+        // }
     }
+
+    let index_path = "index.json";
+    println!("⚒️ creating index at {index_path:?}");
+    let index_file = File::create(index_path)?;
+    serde_json::to_writer(index_file, &tf_index).unwrap_or_else(|err| {
+        eprintln!("ERROR: serder couldn't open the index file: {}", err)
+    });
+    println!("✅ write completed to the index file");
 
     Ok(())
 }
