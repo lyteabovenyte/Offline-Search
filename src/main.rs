@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
 use xml::reader::{EventReader, XmlEvent};
+use std::env;
 
-use serde_json::Result;
+use serde_json;
 
 /// TermFreq is the term to frequency table for each file.
 type TermFreq = HashMap<String, usize>;
@@ -95,8 +96,7 @@ fn read_entire_xml_file(file_path: &Path) -> io::Result<String> {
     Ok(content)
 }
 
-fn main() -> io::Result<()> {
-    let index_path = "index.json";
+fn check_index(index_path: &str) -> io::Result<()> {
     let index_file = File::open(index_path)?;
     println!("🤓 Reading index file ...");
     let tf_index: TermFreqIndex = serde_json::from_reader(&index_file).unwrap_or_else(|err| {
@@ -108,8 +108,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn main2() -> io::Result<()> {
-    let dir_path = "docs.gl/gl4";
+fn index_folder(dir_path: &str) -> io::Result<()> {
     if !fs::metadata(dir_path).is_ok() {
         eprintln!(
             "ERROR: Directory {} does not exist or is not accessible.",
@@ -162,4 +161,42 @@ fn main2() -> io::Result<()> {
     println!("✍️ write completed to the index file.");
 
     Ok(())
+}
+
+fn main() {
+    let mut args = env::args();
+    let _program = args.next().expect("path to program is provided");
+
+    let subcommand = args.next().unwrap_or_else(|| {
+        println!("‼️ ERROR: no subcommand is provided\n\tsubcommands are:\n \t <search>\n \t <index>");
+        process::exit(1)
+    });
+
+    match subcommand.as_str() {
+        "index" => {
+            let dir_path = args.next().unwrap_or_else(|| {
+                println!("ERROR: no directory is provided for {subcommand} subcommand");
+                process::exit(1);
+            });
+
+            index_folder(&dir_path).unwrap_or_else(|err| {
+                println!("ERROR: could not index folder {dir_path}: {err}");
+                process::exit(1);
+            });
+        },
+        "search" => {
+            let index_path = args.next().unwrap_or_else(|| {
+                println!("ERROR: no path to index is provided for {subcommand} subcommand");
+                process::exit(1);
+            });
+            check_index(&index_path).unwrap_or_else(|err| {
+                println!("ERROR: could not check index file {index_path}: {err}");
+                process::exit(1);
+            });
+        }
+        _ => {
+            println!("ERROR: unknown subcommand {subcommand}");
+            process::exit(1)
+        }
+    }
 }
