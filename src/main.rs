@@ -1,9 +1,16 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 use xml::reader::{EventReader, XmlEvent};
+
+/// TermFreq is the term to frequency table for each file.
+type TermFreq = HashMap<String, usize>;
+
+/// TermFreqIndex is the TermFreq for each Doc in the directory
+/// each directory caontains multiple files that are each a PathBuf
+type TermFreqIndex = HashMap<PathBuf, TermFreq>;
 
 struct Lexer<'a> {
     content: &'a [char],
@@ -102,10 +109,11 @@ fn main() -> io::Result<()> {
 
     for file in dir {
         let file_path = file?.path();
-        let file_path = file_path.as_path();
-        let content = read_entire_xml_file(file_path)?.chars().collect::<Vec<_>>();
+        let content = read_entire_xml_file(&file_path)?.chars().collect::<Vec<_>>();
 
-        let mut tf: HashMap<String, usize> = HashMap::new(); // frequency table for terms.
+        let mut tf = TermFreq::new(); // frequency table for terms.
+        let mut tf_index = TermFreqIndex::new();
+
         for token in Lexer::new(&content) {
             let term = token
                 .iter()
@@ -118,7 +126,9 @@ fn main() -> io::Result<()> {
         tf_sorted.sort_by_key(|(_, f)| *f);
         tf_sorted.reverse(); // Sort in descending order of frequency
 
-        println!("{file_path:?} term frequencies:");
+        tf_index.insert(file_path.clone(), tf.clone());
+
+        println!("{} term frequencies:", file_path.display());
         println!("---------------------");
         for (t, f) in tf_sorted.iter().take(10) {
             println!("\t\t{}: {}", t, f);
