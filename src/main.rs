@@ -50,26 +50,26 @@ impl<'a> Lexer<'a> {
         self.chop(n)
     }
 
-    fn next_token(&mut self) -> Option<&'a [char]> {
+    fn next_token(&mut self) -> Option<String> {
         self.trim_left();
         if self.content.is_empty() {
             return None;
         }
 
         if self.content[0].is_numeric() {
-            return Some(self.chop_while(|x| x.is_numeric()));
+            return Some(self.chop_while(|x| x.is_numeric()).iter().collect::<String>());
         }
 
         if self.content[0].is_alphabetic() {
-            return Some(self.chop_while(|x| x.is_alphanumeric()));
+            return Some(self.chop_while(|x| x.is_alphanumeric()).iter().map(|x| x.to_ascii_uppercase()).collect::<String>());
         }
 
-        return Some(self.chop(1));
+        return Some(self.chop(1).iter().collect::<String>());
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = &'a [char];
+    type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_token()
@@ -163,11 +163,8 @@ fn tf_index_of_folder(dir_path: &Path, tf_index: &mut TermFreqIndex) -> Result<(
         let mut tf = TermFreq::new();
 
         for token in Lexer::new(&content) {
-            let term = token
-                .iter()
-                .map(|x| x.to_ascii_uppercase())
-                .collect::<String>();
-            *tf.entry(term).or_insert(0) += 1;
+
+            *tf.entry(token).or_insert(0) += 1;
         }
 
         tf_index.insert(file_path, tf);
@@ -231,9 +228,16 @@ fn serve_request(mut request: Request) -> Result<(), ()> {
                     eprintln!("ERROR: could not interpret body as UTF-8 string: {err}");
                 })?
                 .chars()
-                .collect::<Vec<_>>();
+                .collect::<Vec<_>>(); // this will help us to use the Lexer.
 
-            println!("🔎 Searching: {body:?}", body = body.iter().collect::<String>());
+            for token in Lexer::new(&body) {
+                println!("🎯 Found term: {token}");
+            }
+
+            println!(
+                "🔎 Searching: {body:?}",
+                body = body.iter().collect::<String>()
+            );
 
             request
                 .respond(
