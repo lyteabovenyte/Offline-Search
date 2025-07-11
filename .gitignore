@@ -218,3 +218,9 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+*index*
+index.json
+index-big.json
+index*.json
+docs.gl/
