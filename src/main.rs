@@ -8,7 +8,7 @@ use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
 
 use serde_json;
-use tiny_http::{Header, Request, Response, Server};
+use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 /// TermFreq is the term to frequency table for each file.
 type TermFreq = HashMap<String, usize>;
@@ -187,24 +187,54 @@ fn usage(program: &str) {
     eprintln!("    serve [address]        start local HTTP server with Web Interface");
 }
 
-fn serve_request(request: Request) -> Result<(), ()> {
-    println!(
-        "📞 Received Incoming request.  method: {}, url: {}",
-        request.method(),
-        request.url()
-    );
-    let content_type_text_html = Header::from_bytes("Content-Type", "text/html; charset=utf-8")
-        .expect("ERROR: Header is empty");
+fn serve_404(request: Request) -> Result<(), ()> {
+    let response = Response::from_string("404 Not Found")
+        .with_status_code(StatusCode(404))
+        .with_header(Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap());
 
-    let index_html_file_path = "index.html";
-    let index_html_file = File::open(index_html_file_path).map_err(|err| {
-        eprintln!("ERROR: could not serve the file {index_html_file_path}: {err}")
-    })?;
-    let response = Response::from_file(index_html_file).with_header(content_type_text_html);
-    // we won't stop at errors. handling other requests in a loop.
     request.respond(response).unwrap_or_else(|err| {
         eprintln!("ERROR: could not respond to the request: {err}");
     });
+    Ok(())
+}
+
+fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> Result<(), ()> {
+    let content_type_header =
+        Header::from_bytes("Content-Type", content_type).expect("ERROR: Header is empty");
+
+    let file = File::open(file_path).map_err(|err| {
+        eprintln!("ERROR: could not serve the file {file_path}: {err}");
+    })?;
+    let response = Response::from_file(file).with_header(content_type_header);
+
+    request.respond(response).unwrap_or_else(|err| {
+        eprintln!("ERROR: could not serve static file {file_path}: {err}");
+    });
+    Ok(())
+}
+
+fn serve_request(request: Request) -> Result<(), ()> {
+    match (request.method(), request.url()) {
+        (Method::Get, "/index.js") => {
+            println!(
+                "📞 Received Incoming request.  method: {}, url: {}",
+                request.method(),
+                request.url()
+            );
+            serve_static_file(request, "index.js", "application/javascript; charset=utf-8")?;
+        }
+        (Method::Get, "/") | (Method::Get, "/index.html") => {
+            println!(
+                "📞 Received Incoming request.  method: {}, url: {}",
+                request.method(),
+                request.url()
+            );
+            serve_static_file(request, "index.html", "text/html; charset=utf-8")?;
+        }
+        _ => {
+            serve_404(request)?;
+        }
+    }
     Ok(())
 }
 
