@@ -8,7 +8,7 @@ use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
 
 use serde_json;
-use tiny_http::{Response, Server};
+use tiny_http::{Header, Request, Response, Server};
 
 /// TermFreq is the term to frequency table for each file.
 type TermFreq = HashMap<String, usize>;
@@ -187,6 +187,27 @@ fn usage(program: &str) {
     eprintln!("    serve [address]        start local HTTP server with Web Interface");
 }
 
+fn serve_request(request: Request) -> Result<(), ()> {
+    println!(
+        "📞 Received Incoming request.  method: {}, url: {}",
+        request.method(),
+        request.url()
+    );
+    let content_type_text_html = Header::from_bytes("Content-Type", "text/html; charset=utf-8")
+        .expect("ERROR: Header is empty");
+
+    let index_html_file_path = "index.html";
+    let index_html_file = File::open(index_html_file_path).map_err(|err| {
+        eprintln!("ERROR: could not serve the file {index_html_file_path}: {err}")
+    })?;
+    let response = Response::from_file(index_html_file).with_header(content_type_text_html);
+    // we won't stop at errors. handling other requests in a loop.
+    request.respond(response).unwrap_or_else(|err| {
+        eprintln!("ERROR: could not respond to the request: {err}");
+    });
+    Ok(())
+}
+
 fn entry() -> Result<(), ()> {
     let mut args = env::args();
     let program = args.next().expect("path to program is provided");
@@ -222,14 +243,9 @@ fn entry() -> Result<(), ()> {
             })?;
 
             println!("👂 INFO: Listening at http://{address}");
-            
+
             for request in server.incoming_requests() {
-                println!("📞 Received Incoming request.  method: {}, url: {}", request.method(), request.url());
-                let response = Response::from_string("hello request.");
-                // we won't stop at errors. handling other requests in a loop.
-                request.respond(response).unwrap_or_else(|err| {
-                    eprintln!("ERROR: could not respond to the request: {err}");
-                });
+                serve_request(request)?;
             }
         }
         _ => {
