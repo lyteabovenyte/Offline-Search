@@ -213,11 +213,46 @@ fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> R
     Ok(())
 }
 
-fn serve_request(request: Request) -> Result<(), ()> {
+fn serve_request(mut request: Request) -> Result<(), ()> {
     match (request.method(), request.url()) {
+        (Method::Post, "/api/search") => {
+            println!(
+                "📞 Received Incoming request:  method: {}, url: {}",
+                request.method(),
+                request.url()
+            );
+
+            let mut buf = Vec::new();
+            request.as_reader().read_to_end(&mut buf).map_err(|err| {
+                eprintln!("ERROR: could not read the body of the request: {err}");
+            })?;
+            let body = str::from_utf8(&buf)
+                .map_err(|err| {
+                    eprintln!("ERROR: could not interpret body as UTF-8 string: {err}");
+                })?
+                .chars()
+                .collect::<Vec<_>>();
+
+            println!("🔎 Searching: {body:?}", body = body.iter().collect::<String>());
+
+            request
+                .respond(
+                    Response::from_string(format!(
+                        "Received search query: {}",
+                        body.iter().collect::<String>()
+                    ))
+                    .with_header(
+                        Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap(),
+                    ),
+                )
+                .unwrap_or_else(|err| {
+                    eprintln!("ERROR: could not respond to the request: {err}");
+                });
+            return Ok(());
+        }
         (Method::Get, "/index.js") => {
             println!(
-                "📞 Received Incoming request.  method: {}, url: {}",
+                "📞 Received Incoming request:  method: {}, url: {}",
                 request.method(),
                 request.url()
             );
@@ -225,7 +260,7 @@ fn serve_request(request: Request) -> Result<(), ()> {
         }
         (Method::Get, "/") | (Method::Get, "/index.html") => {
             println!(
-                "📞 Received Incoming request.  method: {}, url: {}",
+                "📞 Received Incoming request:  method: {}, url: {}",
                 request.method(),
                 request.url()
             );
