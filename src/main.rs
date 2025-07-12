@@ -1,88 +1,15 @@
-use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::result::Result;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
 
-use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
+mod model;
+use model::*;
 
-/// TermFreq is the term to frequency table for each file.
-type TermFreq = HashMap<String, usize>;
-
-/// TermFreqIndex is the TermFreq for each Doc in the directory
-/// each directory caontains multiple files that are each a PathBuf
-type TermFreqIndex = HashMap<PathBuf, TermFreq>;
-
-struct Lexer<'a> {
-    content: &'a [char],
-}
-
-impl<'a> Lexer<'a> {
-    fn new(content: &'a [char]) -> Self {
-        Self { content }
-    }
-
-    fn trim_left(&mut self) {
-        // This function trims the left side of the content until a non-whitespace character is found
-        while !self.content.is_empty() && self.content[0].is_whitespace() {
-            self.content = &self.content[1..];
-        }
-    }
-
-    fn chop(&mut self, n: usize) -> &'a [char] {
-        let token = &self.content[0..n];
-        self.content = &self.content[n..];
-        token
-    }
-
-    fn chop_while<P>(&mut self, mut predicate: P) -> &'a [char]
-    where
-        P: FnMut(&char) -> bool,
-    {
-        let mut n = 0;
-        while n < self.content.len() && predicate(&self.content[n]) {
-            n += 1;
-        }
-        self.chop(n)
-    }
-
-    fn next_token(&mut self) -> Option<String> {
-        self.trim_left();
-        if self.content.is_empty() {
-            return None;
-        }
-
-        if self.content[0].is_numeric() {
-            return Some(
-                self.chop_while(|x| x.is_numeric())
-                    .iter()
-                    .collect::<String>(),
-            );
-        }
-
-        if self.content[0].is_alphabetic() {
-            return Some(
-                self.chop_while(|x| x.is_alphanumeric())
-                    .iter()
-                    .map(|x| x.to_ascii_uppercase())
-                    .collect::<String>(),
-            );
-        }
-
-        Some(self.chop(1).iter().collect::<String>())
-    }
-}
-
-impl<'a> Iterator for Lexer<'a> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_token()
-    }
-}
+mod server;
 
 fn read_entire_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
@@ -191,119 +118,6 @@ fn usage(program: &str) {
     eprintln!("    serve <index-file> [address]       start local HTTP server with Web Interface");
 }
 
-fn serve_404(request: Request) -> Result<(), ()> {
-    let response = Response::from_string("404 Not Found")
-        .with_status_code(StatusCode(404))
-        .with_header(Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap());
-
-    request.respond(response).map_err(|err| {
-        eprintln!("ERROR: could not respond to the request: {err}");
-    })
-}
-
-fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> Result<(), ()> {
-    let content_type_header =
-        Header::from_bytes("Content-Type", content_type).expect("ERROR: Header is empty");
-
-    let file = File::open(file_path).map_err(|err| {
-        eprintln!("ERROR: could not serve the file {file_path}: {err}");
-    })?;
-    let response = Response::from_file(file).with_header(content_type_header);
-
-    request.respond(response).map_err(|err| {
-        eprintln!("ERROR: could not serve static file {file_path}: {err}");
-    })
-}
-
-/// Returns the total frequency of the term `t` in the document frequency index `d`.
-/// It sums up the term frequencies across all documents in the index.
-/// If the term is not found in a document, it contributes 0 to the sum.
-fn tf(t: &str, d: &TermFreq) -> f32 {
-    d.get(t).cloned().unwrap_or(0) as f32 / d.iter().map(|(_, v)| *v).sum::<usize>() as f32
-}
-
-/// Returns the inverse document frequency (IDF) of the term `t` in the document frequency index `d`.
-/// It calculates the logarithm of the ratio of the total number of documents to the number of documents containing the term.
-/// If the term is not found in any document, it returns 0.
-/// The IDF is a measure of how important a term is in the context of the entire document collection.
-fn idf(t: &str, d: &TermFreqIndex) -> f32 {
-    let n: f32 = d.len() as f32;
-    let m: f32 = 1f32 + d.values().filter(|tf| tf.contains_key(t)).count().max(1) as f32;
-    return (n / m).log10();
-}
-
-fn serve_api_search(tf_index: &TermFreqIndex, mut request: Request) -> Result<(), ()> {
-    let mut buf = Vec::new();
-    request.as_reader().read_to_end(&mut buf).map_err(|err| {
-        eprintln!("ERROR: could not read the body of the request: {err}");
-    })?;
-    let body = str::from_utf8(&buf)
-        .map_err(|err| {
-            eprintln!("ERROR: could not interpret body as UTF-8 string: {err}");
-        })?
-        .chars()
-        .collect::<Vec<_>>(); // this will help us to use the Lexer.
-
-    println!(
-        "🔎 Searching: {body:?}\n",
-        body = body.iter().collect::<String>()
-    );
-
-    let mut results: Vec<(&Path, f32)> = Vec::new();
-    for (path, tf_table) in tf_index {
-        let mut rank = 0.0;
-        for token in Lexer::new(&body) {
-            rank += tf(&token, tf_table) * idf(&token, tf_index);
-        }
-        results.push((path, rank));
-    }
-
-    results.sort_by(|(_, rank1), (_, rank2)| rank2.partial_cmp(rank1).unwrap());
-
-    let json =
-        serde_json::to_string(&results.iter().take(20).collect::<Vec<_>>()).map_err(|err| {
-            eprintln!("ERROR: could not serialize results to JSON: {err}");
-        })?;
-
-    let content_type_header = Header::from_bytes("Content-Type", "application/json; charset=utf-8")
-        .expect("ERROR: Header is empty");
-
-    let response = Response::from_string(&json).with_header(content_type_header);
-    request.respond(response).map_err(|err| {
-        eprintln!("ERROR: could not respond to the request: {err}");
-    })
-}
-
-fn serve_request(tf_index: &TermFreqIndex, request: Request) -> Result<(), ()> {
-    match (request.method(), request.url()) {
-        (Method::Post, "/api/search") => {
-            println!(
-                "📞 Received Incoming request:  method: {}, url: {}",
-                request.method(),
-                request.url()
-            );
-            serve_api_search(&tf_index, request)
-        }
-        (Method::Get, "/index.js") => {
-            println!(
-                "📞 Received Incoming request:  method: {}, url: {}",
-                request.method(),
-                request.url()
-            );
-            serve_static_file(request, "index.js", "application/javascript; charset=utf-8")
-        }
-        (Method::Get, "/") | (Method::Get, "/index.html") => {
-            println!(
-                "📞 Received Incoming request:  method: {}, url: {}",
-                request.method(),
-                request.url()
-            );
-            serve_static_file(request, "index.html", "text/html; charset=utf-8")
-        }
-        _ => serve_404(request),
-    }
-}
-
 fn entry() -> Result<(), ()> {
     let mut args = env::args();
     let program = args.next().expect("path to program is provided");
@@ -330,6 +144,27 @@ fn entry() -> Result<(), ()> {
                 usage(&program);
             })?;
 
+            let prompt = args
+                .next()
+                .ok_or_else(|| {
+                    usage(&program);
+                    eprintln!("ERROR: no search query is provided for {subcommand} subcommand");
+                })?
+                .chars()
+                .collect::<Vec<_>>();
+
+            let index_file = File::open(&index_path).map_err(|err| {
+                eprintln!("ERROR: could not open index file {index_path}: {err}");
+            })?;
+
+            let tf_index: TermFreqIndex = serde_json::from_reader(index_file).map_err(|err| {
+                eprintln!("ERROR: could not parse index file {index_path}: {err}");
+            })?;
+
+            for (path, rank) in search_query(&tf_index, &prompt).iter().take(20) {
+                println!("Found match: {} (rank: {})", path.display(), rank);
+            }
+
             check_index(&index_path)?;
         }
         "serve" => {
@@ -347,15 +182,7 @@ fn entry() -> Result<(), ()> {
             })?;
 
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            let server = Server::http(&address).map_err(|err| {
-                eprintln!("ERROR: could not start the HTTP server at {address}: {err}");
-            })?;
-
-            println!("👂 INFO: Listening at http://{address}");
-
-            for request in server.incoming_requests() {
-                serve_request(&tf_index, request).ok();
-            }
+            return server::start(&address, &tf_index);
         }
         _ => {
             println!("ERROR: unknown subcommand {subcommand}");
