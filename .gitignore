@@ -231,3 +231,11 @@ index_*.json
 index-big-*.json
 index*.json
 index.json
+.Ds_Store
+*.swp
+*.swo
+*.swm
+*.swp
+*.swn
+*.swa
+.DS_Store
