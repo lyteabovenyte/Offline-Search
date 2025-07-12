@@ -226,3 +226,8 @@ index*.json
 docs.gl
 docs*/
 ./docs.gl/*
+small/
+index_*.json
+index-big-*.json
+index*.json
+index.json
