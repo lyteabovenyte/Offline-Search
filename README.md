@@ -105,6 +105,14 @@ This will return a list of relevant documents, ranked by their relevance to your
 - **Crawling**: OfflineSearch scans your specified directory, parsing supported file types (HTML, XHTML, PDF, text) to extract content.
 - **Indexing**: Builds an *inverted index* to map terms to documents, optimized for fast lookups and minimal memory usage.
 - **Ranking**: Uses a modified **TF-IDF** (Term Frequency-Inverse Document Frequency) algorithm, inspired by early search engine techniques, to rank results by relevance.
+$$
+tf(t, d) = \frac{f_{t,d}}{\sum_{t' \in d} f_{t',d}}
+$$
+
+$$
+\text{idf}(t, D) = \log \frac{N}{\left| \{ d \in D : t \in d \} \right|}
+$$
+
 - **Querying**: Processes natural language queries, returning results with highlighted snippets for easy navigation.
 
 
