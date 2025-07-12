@@ -223,4 +223,6 @@ Cargo.lock
 index.json
 index-big.json
 index*.json
-docs.gl/
+docs.gl
+docs*/
+./docs.gl/*

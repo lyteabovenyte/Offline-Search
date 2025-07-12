@@ -196,10 +196,9 @@ fn serve_404(request: Request) -> Result<(), ()> {
         .with_status_code(StatusCode(404))
         .with_header(Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap());
 
-    request.respond(response).unwrap_or_else(|err| {
+    request.respond(response).map_err(|err| {
         eprintln!("ERROR: could not respond to the request: {err}");
-    });
-    Ok(())
+    })
 }
 
 fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> Result<(), ()> {
@@ -211,10 +210,9 @@ fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> R
     })?;
     let response = Response::from_file(file).with_header(content_type_header);
 
-    request.respond(response).unwrap_or_else(|err| {
+    request.respond(response).map_err(|err| {
         eprintln!("ERROR: could not serve static file {file_path}: {err}");
-    });
-    Ok(())
+    })
 }
 
 /// Returns the total frequency of the term `t` in the document frequency index `d`.
@@ -231,10 +229,52 @@ fn tf(t: &str, d: &TermFreq) -> f32 {
 fn idf(t: &str, d: &TermFreqIndex) -> f32 {
     let n: f32 = d.len() as f32;
     let m: f32 = 1f32 + d.values().filter(|tf| tf.contains_key(t)).count().max(1) as f32;
-    (n / m).log10()
+    return (n / m).log10();
 }
 
-fn serve_request(tf_index: &TermFreqIndex, mut request: Request) -> Result<(), ()> {
+fn serve_api_search(tf_index: &TermFreqIndex, mut request: Request) -> Result<(), ()> {
+    let mut buf = Vec::new();
+    request.as_reader().read_to_end(&mut buf).map_err(|err| {
+        eprintln!("ERROR: could not read the body of the request: {err}");
+    })?;
+    let body = str::from_utf8(&buf)
+        .map_err(|err| {
+            eprintln!("ERROR: could not interpret body as UTF-8 string: {err}");
+        })?
+        .chars()
+        .collect::<Vec<_>>(); // this will help us to use the Lexer.
+
+    println!(
+        "🔎 Searching: {body:?}\n",
+        body = body.iter().collect::<String>()
+    );
+
+    let mut results: Vec<(&Path, f32)> = Vec::new();
+    for (path, tf_table) in tf_index {
+        let mut rank = 0.0;
+        for token in Lexer::new(&body) {
+            rank += tf(&token, tf_table) * idf(&token, tf_index);
+        }
+        results.push((path, rank));
+    }
+
+    results.sort_by(|(_, rank1), (_, rank2)| rank2.partial_cmp(rank1).unwrap());
+
+    let json =
+        serde_json::to_string(&results.iter().take(20).collect::<Vec<_>>()).map_err(|err| {
+            eprintln!("ERROR: could not serialize results to JSON: {err}");
+        })?;
+
+    let content_type_header = Header::from_bytes("Content-Type", "application/json; charset=utf-8")
+        .expect("ERROR: Header is empty");
+
+    let response = Response::from_string(&json).with_header(content_type_header);
+    request.respond(response).map_err(|err| {
+        eprintln!("ERROR: could not respond to the request: {err}");
+    })
+}
+
+fn serve_request(tf_index: &TermFreqIndex, request: Request) -> Result<(), ()> {
     match (request.method(), request.url()) {
         (Method::Post, "/api/search") => {
             println!(
@@ -242,57 +282,7 @@ fn serve_request(tf_index: &TermFreqIndex, mut request: Request) -> Result<(), (
                 request.method(),
                 request.url()
             );
-
-            let mut buf = Vec::new();
-            request.as_reader().read_to_end(&mut buf).map_err(|err| {
-                eprintln!("ERROR: could not read the body of the request: {err}");
-            })?;
-            let body = str::from_utf8(&buf)
-                .map_err(|err| {
-                    eprintln!("ERROR: could not interpret body as UTF-8 string: {err}");
-                })?
-                .chars()
-                .collect::<Vec<_>>(); // this will help us to use the Lexer.
-
-            println!(
-                "🔎 Searching: {body:?}\n",
-                body = body.iter().collect::<String>()
-            );
-
-            let mut results: Vec<(&Path, f32)> = Vec::new();
-            for (path, tf_table) in tf_index {
-                // println!("📂 Document: {}", path.display());
-                let mut rank = 0.0;
-                for token in Lexer::new(&body) {
-                    rank += tf(&token, tf_table) * idf(&token, tf_index);
-                }
-                results.push((path, rank));
-            }
-
-            results.sort_by(|(_, rank1), (_, rank2)| rank2.partial_cmp(rank1).unwrap());
-            println!("✅ Top 10 results:");
-            for (path, relevance) in results.iter().take(10) {
-                println!(
-                    "\t\t🧩 Document: {} 👉 Relevance: {}",
-                    path.display(),
-                    relevance
-                );
-            }
-
-            request
-                .respond(
-                    Response::from_string(format!(
-                        "Received search query: {}",
-                        body.iter().collect::<String>()
-                    ))
-                    .with_header(
-                        Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap(),
-                    ),
-                )
-                .unwrap_or_else(|err| {
-                    eprintln!("ERROR: could not respond to the request: {err}");
-                });
-            return Ok(());
+            serve_api_search(&tf_index, request)
         }
         (Method::Get, "/index.js") => {
             println!(
@@ -300,7 +290,7 @@ fn serve_request(tf_index: &TermFreqIndex, mut request: Request) -> Result<(), (
                 request.method(),
                 request.url()
             );
-            serve_static_file(request, "index.js", "application/javascript; charset=utf-8")?;
+            serve_static_file(request, "index.js", "application/javascript; charset=utf-8")
         }
         (Method::Get, "/") | (Method::Get, "/index.html") => {
             println!(
@@ -308,13 +298,10 @@ fn serve_request(tf_index: &TermFreqIndex, mut request: Request) -> Result<(), (
                 request.method(),
                 request.url()
             );
-            serve_static_file(request, "index.html", "text/html; charset=utf-8")?;
+            serve_static_file(request, "index.html", "text/html; charset=utf-8")
         }
-        _ => {
-            serve_404(request)?;
-        }
+        _ => serve_404(request),
     }
-    Ok(())
 }
 
 fn entry() -> Result<(), ()> {
@@ -367,7 +354,7 @@ fn entry() -> Result<(), ()> {
             println!("👂 INFO: Listening at http://{address}");
 
             for request in server.incoming_requests() {
-                serve_request(&tf_index, request)?;
+                serve_request(&tf_index, request).ok();
             }
         }
         _ => {
