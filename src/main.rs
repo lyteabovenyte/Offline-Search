@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::result::Result;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
+use std::io::{BufReader, BufWriter};
 
 mod model;
 use model::*;
@@ -15,7 +16,7 @@ fn read_entire_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
         eprintln!("ERROR: could not open {}: {err}", file_path.display());
     })?;
-    let er = EventReader::new(file);
+    let er = EventReader::new(BufReader::new(file));
 
     let mut content = String::new(); // buffer to hold the content
 
@@ -58,7 +59,7 @@ fn save_tf_index(tf_index: TermFreqIndex, index_path: &str) -> Result<(), ()> {
         eprintln!("ERROR: could not create the index file at {index_path}: {err}");
     })?;
 
-    serde_json::to_writer(index_file, &tf_index).map_err(|err| {
+    serde_json::to_writer(BufWriter::new(index_file), &tf_index).map_err(|err| {
         eprintln!("ERROR: could not serialize index into {index_path:?}: {err}");
     })?;
     Ok(())
