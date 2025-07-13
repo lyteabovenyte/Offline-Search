@@ -54,7 +54,12 @@ fn serve_api_search(model: &impl Model, mut request: Request) -> io::Result<()> 
         body = body.iter().collect::<String>()
     );
 
-    let result = model.search_query(&body);
+    let result = match model.search_query(&body) {
+        Ok(result) => result,
+        Err(err) => {
+            return serve_500(request);
+        }
+    };
 
     let json = match serde_json::to_string(&result.iter().take(20).collect::<Vec<_>>()) {
         Ok(json) => json,
