@@ -53,7 +53,7 @@ fn check_index(index_path: &str) -> Result<(), ()> {
     Ok(())
 }
 
-fn save_model_as_json(model: &Model, index_path: &str) -> Result<(), ()> {
+fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {
     println!("🛟 Saving index at {index_path}");
     let index_file = File::create(index_path).map_err(|err| {
         eprintln!("ERROR: could not create the index file at {index_path}: {err}");
@@ -65,7 +65,7 @@ fn save_model_as_json(model: &Model, index_path: &str) -> Result<(), ()> {
     Ok(())
 }
 
-fn add_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> {
+fn add_folder_to_model(dir_path: &Path, model: &mut dyn Model) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
         eprintln!("ERROR: could not open directory {dir_path:?}: {err}");
     })?;
@@ -96,22 +96,7 @@ fn add_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> {
             Err(()) => continue 'next_file,
         };
 
-        let mut tf = TermFreq::new();
-        let mut n = 0;
-        for token in Lexer::new(&content) {
-            *tf.entry(token).or_insert(0) += 1;
-            n += 1;
-        }
-
-        for t in tf.keys() {
-            if let Some(freq) = model.df.get_mut(t) {
-                *freq += 1;
-            } else {
-                model.df.insert(t.to_string(), 1);
-            }
-        }
-
-        model.tfpd.insert(file_path, (n, tf));
+        model.add_document(file_path, &content)?;
     }
     Ok(())
 }
@@ -144,9 +129,14 @@ fn entry() -> Result<(), ()> {
                 usage(&program);
             })?;
 
-            let mut model = Default::default();
+            let index_path = "index.db";
+            let mut model = SqliteModel::open(Path::new(index_path))?;
+            println!("📂 Indexing directory: {dir_path}");
+            model.begin()?;
             add_folder_to_model(Path::new(&dir_path), &mut model)?;
-            save_model_as_json(&model, "index.json")?;
+            model.commit()?;
+            println!("✅ Indexing completed. Saving index to {index_path}");
+            // save_model_as_json(&model, index_path)?;
         }
         "search" => {
             let index_path = args.next().ok_or_else(|| {
@@ -167,11 +157,11 @@ fn entry() -> Result<(), ()> {
                 eprintln!("ERROR: could not open index file {index_path}: {err}");
             })?;
 
-            let model: Model = serde_json::from_reader(index_file).map_err(|err| {
+            let model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
                 eprintln!("ERROR: could not parse index file {index_path}: {err}");
             })?;
 
-            for (path, rank) in search_query(&model, &prompt).iter().take(20) {
+            for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
                 println!("Found match: {} (rank: {})", path.display(), rank);
             }
 
@@ -187,7 +177,7 @@ fn entry() -> Result<(), ()> {
                 eprintln!("ERROR: could not open index file {index_path}: {err}");
             })?;
 
-            let model: Model = serde_json::from_reader(index_file).map_err(|err| {
+            let model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
                 eprintln!("ERROR: could not parse index file {index_path}: {err}");
             })?;
 

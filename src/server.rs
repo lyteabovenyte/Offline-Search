@@ -29,7 +29,7 @@ fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> R
     })
 }
 
-fn serve_api_search(model: &Model, mut request: Request) -> Result<(), ()> {
+fn serve_api_search(model: &InMemoryModel, mut request: Request) -> Result<(), ()> {
     let mut buf = Vec::new();
     request.as_reader().read_to_end(&mut buf).map_err(|err| {
         eprintln!("ERROR: could not read the body of the request: {err}");
@@ -46,7 +46,7 @@ fn serve_api_search(model: &Model, mut request: Request) -> Result<(), ()> {
         body = body.iter().collect::<String>()
     );
 
-    let results = search_query(model, &body);
+    let results = model.search_query(&body)?;
 
     let json =
         serde_json::to_string(&results.iter().take(20).collect::<Vec<_>>()).map_err(|err| {
@@ -62,7 +62,7 @@ fn serve_api_search(model: &Model, mut request: Request) -> Result<(), ()> {
     })
 }
 
-fn serve_request(model: &Model, request: Request) -> Result<(), ()> {
+fn serve_request(model: &InMemoryModel, request: Request) -> Result<(), ()> {
     match (request.method(), request.url()) {
         (Method::Post, "/api/search") => {
             println!(
@@ -92,7 +92,7 @@ fn serve_request(model: &Model, request: Request) -> Result<(), ()> {
     }
 }
 
-pub fn start(address: &str, model: &Model) -> Result<(), ()> {
+pub fn start(address: &str, model: &InMemoryModel) -> Result<(), ()> {
     let server = Server::http(address).map_err(|err| {
         eprintln!("ERROR: could not start the HTTP server at {address}: {err}");
     })?;
