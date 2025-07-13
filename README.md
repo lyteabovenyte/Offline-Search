@@ -17,22 +17,13 @@ In many parts of the world, like Iran, internet access is often disrupted, leavi
 
 <br />
 
-✅ **Relevance-Driven**: Uses advanced indexing and ranking algorithms inspired by early search engines to deliver the most relevant results.
-
-✅ **Offline-First**: Works entirely on your local machine, ensuring access to your resources anytime, anywhere.
-
-✅ **Versatile**: Supports a wide range of file types (HTML, XHTML, PDF, source code) for comprehensive search.
-
-✅ **Fast and Efficient**: Built with Rust for unparalleled performance and memory safety.
-
-
-<br />
-
 <div align="center"><h3>Features</h3></div>
 
 🎯 **Flexible Indexing**: Automatically crawls and indexes files in specified directories, supporting HTML, XHTML, PDFs, and plain text (e.g., source code).
 
-🎯 **Smart Search**: Implements a ranking algorithm based on term frequency and document relevance, inspired by early PageRank concepts.
+🎯 **Smart Search**: Implements a ranking algorithm based on [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf), inspired by early *PageRank* concepts.
+
+🎯 **Stemming and NLP**: Utilizes the [Snowball](https://snowballstem.org/) stemming algorithm to normalize words for more accurate matching, and incorporates basic natural language processing techniques to enable semantic search—helping you find relevant documents even when your query uses different word forms or synonyms.
 
 🎯 **Cross-Platform**: Runs on Windows, macOS, and Linux with minimal dependencies.
 
@@ -55,56 +46,45 @@ In many parts of the world, like Iran, internet access is often disrupted, leavi
 1. Clone the Repository:
 
 ```bash
-git clone https://github.com/lyteabovenyte/offlinesearch.git
+git clone https://github.com/lyteabovenyte/offline-search.git
 
-cd offlinesearch
+cd offline-search
 ```
 
 
-2. Build the Project:
+1. Index Document:
 
 ```bash
-cargo build --release
+cargo run --release index [--sqlite] </path/to/your/documents/>
 ```
 
 
-3. Run OfflineSearch:
+3. Serve OfflineSearch Locally:
 
 ```bash
-cargo run --release -- --index /path/to/your/documents
+cargo run --release serve [address] </path/to/your/indexed/file> # for local index.json files
+cargo run --release serve --sqlite [address] </path/to/your/sqlite/database/file> # from sqlite database
 ```
 
 
-4. Search Your Collection:
+4. Search Your Collection via CLI:
 
 ```bash
-cargo run --release -- --search "your query here"
+cargo run --release search "your query here"
 ```
 
-
-
-#### Example Usage
-Index a directory of downloaded files if you haven't yet
-
-```bash
-cargo run --release -- --index ~/Documents/research_papers
-```
-
-Search for a term
-
-```bash
-cargo run --release -- --search "machine learning algorithms"
-```
-
-This will return a list of relevant documents, ranked by their relevance to your query, with snippets highlighting matching content.
+5. Search Your Collection via Browser.
 
 
 <br />
 <div align="center"><h3>How It Works</h3></div>
 
-- **Crawling**: OfflineSearch scans your specified directory, parsing supported file types (HTML, XHTML, PDF, text) to extract content.
-- **Indexing**: Builds an *inverted index* to map terms to documents, optimized for fast lookups and minimal memory usage.
+- **Crawling**: OfflineSearch scans your specified directory, parsing supported file types (HTML, XHTML, PDF, text) to extract content. During crawling, terms are stemmed using the Snowball stemming algorithm and basic NLP techniques are applied to enhance semantic relevance. All processed data is cached in either a SQLite database or a JSON file for efficient retrieval.
+
+- **Indexing**: Constructs a highly efficient *inverted index* that maps normalized terms to their occurrences across documents. Each entry in the index includes metadata such as term frequency, document location, and contextual information (e.g., title, headings, body text). This structure enables rapid, memory-efficient lookups and supports advanced search features like phrase matching and proximity queries. The indexing process also deduplicates content and filters out stop words to improve result quality.
+
 - **Ranking**: Uses a modified **TF-IDF** (Term Frequency-Inverse Document Frequency) algorithm, inspired by early search engine techniques, to rank results by relevance.
+
 $$
 tf(t, d) = \frac{f_{t,d}}{\sum_{t' \in d} f_{t',d}}
 $$
@@ -113,7 +93,7 @@ $$
 \text{idf}(t, D) = \log \frac{N}{\left| \{ d \in D : t \in d \} \right|}
 $$
 
-- **Querying**: Processes natural language queries, returning results with highlighted snippets for easy navigation.
+- **Querying**: Processes natural language queries, returning semantically relevant results with highlighted snippets that match the query. The system uses the Snowball stemming algorithm to improve matching accuracy and ensure that different word forms are recognized, helping users find the most relevant information quickly.
 
 
 <br />
@@ -121,7 +101,7 @@ $$
 
 - [ ] Add support for additional file formats (e.g., Markdown, Docx).
 - [ ] Implement advanced query features (e.g., boolean operators, fuzzy search).
-- [ ] Create a GUI for non-technical users.
+- [ ] Add Dynamic Web UI
 - [ ] Optimize indexing for larger datasets (>100GB).
 - [ ] Add multilingual support for non-Latin scripts.
 
