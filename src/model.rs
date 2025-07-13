@@ -112,7 +112,8 @@ pub fn search_query<'a>(model: &'a Model, query: &'a [char]) -> Vec<(&'a Path, f
         let mut rank = 0.0;
         let tokens = Lexer::new(query).collect::<Vec<_>>();
         for token in tokens {
-            rank += compute_tf(&token, *n, tf_table) * compute_idf(&token, model.tfpd.len(), &model.df);
+            rank +=
+                compute_tf(&token, *n, tf_table) * compute_idf(&token, model.tfpd.len(), &model.df);
         }
         results.push((path, rank));
     }
