@@ -94,12 +94,65 @@ impl Model for SqliteModel {
             stmt.bind_iter::<_, (_, sqlite::Value)>([
                 (":path", path.display().to_string().as_str().into()),
                 (":term_count", (terms.len() as i64).into()),
-            ]).map_err(log_err)?;
+            ])
+            .map_err(log_err)?;
             stmt.next().map_err(log_and_ignore)?;
-            unsafe {
-                sqlite3_sys::sqlite3_last_insert_rowid(self.connection.as_raw())
-            }
+            unsafe { sqlite3_sys::sqlite3_last_insert_rowid(self.connection.as_raw()) }
         };
+
+        let mut tf = TermFreq::new();
+        for term in Lexer::new(content) {
+            *tf.entry(term).or_insert(0) += 1;
+        }
+
+        for (term, freq) in &tf {
+            // TermFreq table
+            {
+                let query = "SELECT freq FROM TermFreq WHERe doc_id = :doc_id AND term = :term";
+                let log_err = |err| {
+                    eprintln!("ERROR: Could not execute query {query}: {err}");
+                };
+                let mut stmt = self.connection.prepare(query).map_err(log_err)?;
+                stmt.bind_iter::<_, (_, sqlite::Value)>([
+                    (":doc_id", doc_id.into()),
+                    (":term", term.as_str().into()),
+                    (":freq", (*freq as i64).into()),
+                ])
+                .map_err(log_err)?;
+                stmt.next().map_err(log_and_ignore)?;
+            }
+
+            // DocFreq table
+
+            {
+                let freq = {
+                    let query = "SELECT freq FROM DocFreq WHERE term = :term";
+                    let log_err = |err| {
+                        eprintln!("ERROR: Could not execute query {query}: {err}");
+                    };
+                    let mut stmt = self.connection.prepare(query).map_err(log_err)?;
+                    stmt.bind_iter::<_, (_, sqlite::Value)>([(":term", term.as_str().into())])
+                        .map_err(log_err)?;
+                    match stmt.next().map_err(log_err)? {
+                        sqlite::State::Row => stmt.read::<i64, _>("freq").map_err(log_err)?,
+                        sqlite::State::Done => 0,
+                    }
+                };
+
+                // TODO: find a better way to auto increment the frequency
+                let query = "INSERT OR REPLACE INTO DocFreq(term, freq) VALUES (:term, :freq)";
+                let log_err = |err| {
+                    eprintln!("ERROR: Could not execute query {query}: {err}");
+                };
+                let mut stmt = self.connection.prepare(query).map_err(log_err)?;
+                stmt.bind_iter::<_, (_, sqlite::Value)>([
+                    (":term", term.as_str().into()),
+                    (":freq", (freq + 1).into()), // TODO: increment the frequency -> bottleneck.
+                ])
+                .map_err(log_err)?;
+                stmt.next().map_err(log_err)?;
+            }
+        }
 
         for term in &terms {
             let freq = {
@@ -111,10 +164,11 @@ impl Model for SqliteModel {
                 stmt.bind_iter::<_, (_, sqlite::Value)>([
                     (":doc_id", doc_id.into()),
                     (":term", term.as_str().into()),
-                ]).map_err(log_err)?;
+                ])
+                .map_err(log_err)?;
                 match stmt.next().map_err(log_err)? {
                     sqlite::State::Row => stmt.read::<i64, _>("freq").map_err(log_err)?,
-                    sqlite::State::Done => 0
+                    sqlite::State::Done => 0,
                 }
             };
 
@@ -128,7 +182,8 @@ impl Model for SqliteModel {
                 (":doc_id", doc_id.into()),
                 (":term", term.as_str().into()),
                 (":freq", (freq + 1).into()),
-            ]).map_err(log_err)?;
+            ])
+            .map_err(log_err)?;
             stmt.next().map_err(log_err)?;
         }
 
@@ -162,7 +217,8 @@ impl Model for InMemoryModel {
         for (path, (n, tf_table)) in &self.tfpd {
             let mut rank = 0f32;
             for token in &tokens {
-                rank += compute_tf(token, *n, tf_table) * compute_idf(token, self.tfpd.len(), &self.df);
+                rank +=
+                    compute_tf(token, *n, tf_table) * compute_idf(token, self.tfpd.len(), &self.df);
             }
             result.push((path.clone(), rank));
         }
@@ -276,5 +332,3 @@ impl<'a> Iterator for Lexer<'a> {
         self.next_token()
     }
 }
-
-

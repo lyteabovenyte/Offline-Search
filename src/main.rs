@@ -53,7 +53,7 @@ fn check_index(index_path: &str) -> Result<(), ()> {
     Ok(())
 }
 
-fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {  
+fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {
     println!("🛟 Saving index at {index_path}");
     let index_file = File::create(index_path).map_err(|err| {
         eprintln!("ERROR: could not create the index file at {index_path}: {err}");
@@ -117,7 +117,20 @@ fn entry() -> Result<(), ()> {
     let mut args = env::args();
     let program = args.next().expect("path to program is provided");
 
-    let subcommand = args.next().ok_or_else(|| {
+    let mut subcommand = None;
+    let mut use_sqlite_mode = false;
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--sqlite" => use_sqlite_mode = true,
+            _ => {
+                subcommand = Some(arg);
+                break;
+            }
+        }
+    }
+
+    let subcommand = subcommand.ok_or_else(|| {
         usage(&program);
         println!("ERROR: no subcommand is provided");
     })?;
@@ -129,14 +142,29 @@ fn entry() -> Result<(), ()> {
                 usage(&program);
             })?;
 
-            let index_path = "index.db";
-            let mut model = SqliteModel::open(Path::new(index_path))?;
-            println!("📂 Indexing directory: {dir_path}");
-            model.begin()?;
-            add_folder_to_model(Path::new(&dir_path), &mut model)?;
-            model.commit()?;
-            println!("✅ Indexing completed. Saving index to {index_path}");
-            // save_model_as_json(&model, index_path)?;
+            if use_sqlite_mode {
+                let index_path = "index.db";
+                if let Err(err) = fs::remove_file(index_path) {
+                    if err.kind() != std::io::ErrorKind::NotFound {
+                        eprintln!(
+                            "ERROR: could not remove existing index file {index_path}: {err}"
+                        );
+                    }
+                }
+                println!("✅ Removed existing index file {index_path}");
+
+                let mut model = SqliteModel::open(Path::new(index_path))?;
+                println!("📂 Indexing directory: {dir_path}");
+                model.begin()?;
+                add_folder_to_model(Path::new(&dir_path), &mut model)?;
+                model.commit()
+            } else {
+                let index_path = "index.json";
+                let mut model = Default::default();
+                println!("📂 Indexing directory: {dir_path}");
+                add_folder_to_model(Path::new(&dir_path), &mut model)?;
+                save_model_as_json(&model, index_path)
+            }
         }
         "search" => {
             let index_path = args.next().ok_or_else(|| {
@@ -153,19 +181,27 @@ fn entry() -> Result<(), ()> {
                 .chars()
                 .collect::<Vec<_>>();
 
-            let index_file = File::open(&index_path).map_err(|err| {
-                eprintln!("ERROR: could not open index file {index_path}: {err}");
-            })?;
-
-            let model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
-                eprintln!("ERROR: could not parse index file {index_path}: {err}");
-            })?;
-
-            for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
-                println!("Found match: {} (rank: {})", path.display(), rank);
+            if use_sqlite_mode {
+                let model = SqliteModel::open(Path::new(&index_path))?;
+                println!("🔍 Searching for: {}\n", prompt.iter().collect::<String>());
+                for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
+                    println!("\t🧩 Found match: {} (rank: {})", path.display(), rank);
+                }
+            } else {
+                let index_file = File::open(&index_path).map_err(|err| {
+                    eprintln!("ERROR: could not open index file {index_path}: {err}");
+                })?;
+                // TODO: should we use BufReader here?
+                let model: InMemoryModel = serde_json::from_reader::<_, InMemoryModel>(index_file)
+                    .map_err(|err| {
+                        eprintln!("ERROR: could not parse index file {index_path}: {err}");
+                    })?;
+                for (path, rank) in model.search_query(&prompt)?.iter().take(20) {
+                    println!("\t🧩 Found match: {} (rank: {})", path.display(), rank);
+                }
             }
-
-            check_index(&index_path)?;
+            println!("✅ Search completed.");
+            Ok(())
         }
         "serve" => {
             let index_path = args.next().ok_or_else(|| {
@@ -173,23 +209,28 @@ fn entry() -> Result<(), ()> {
                 eprintln!("ERROR: no path to index is provided for {subcommand} subcommand");
             })?;
 
-            let index_file = File::open(&index_path).map_err(|err| {
-                eprintln!("ERROR: could not open index file {index_path}: {err}");
-            })?;
-
-            let model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
-                eprintln!("ERROR: could not parse index file {index_path}: {err}");
-            })?;
-
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            return server::start(&address, &model);
+            if use_sqlite_mode {
+                let model = SqliteModel::open(Path::new(&index_path)).map_err(|err| {
+                    eprintln!("ERROR: could not open index file {index_path}: {err:?}");
+                })?;
+                server::start(&address, &model)
+            } else {
+                let index_file = File::open(&index_path).map_err(|err| {
+                    eprintln!("ERROR: could not open index file {index_path}: {err}");
+                })?;
+                // TODO: should we use BufReader here?
+                let model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
+                    eprintln!("ERROR: could not parse index file {index_path}: {err}");
+                })?;
+                server::start(&address, &model)
+            }
         }
         _ => {
             println!("ERROR: unknown subcommand {subcommand}");
-            return Err(());
+            Err(())
         }
     }
-    Ok(())
 }
 
 fn main() -> ExitCode {
