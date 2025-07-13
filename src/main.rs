@@ -1,3 +1,8 @@
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(unused_attributes)]
+#![allow(unused_associated_type_bounds)]
+#![allow(dead_code)]
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
@@ -6,11 +11,11 @@ use std::process::ExitCode;
 use std::result::Result;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
-
-mod model;
 use model::*;
 
+mod model;
 mod server;
+mod snowball;
 
 fn read_entire_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
