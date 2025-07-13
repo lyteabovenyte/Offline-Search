@@ -7,7 +7,7 @@ pub type TermFreq = HashMap<String, usize>;
 
 /// TermFreqPerDoc is the TermFreq for each Doc in the directory
 /// each directory caontains multiple files that are each a PathBuf
-pub type TermFreqPerDoc = HashMap<PathBuf, TermFreq>;
+pub type TermFreqPerDoc = HashMap<PathBuf, (usize, TermFreq)>;
 
 /// DocFreq is the document frequency index, which maps terms to the number of documents they appear in.
 /// This is useful for calculating the inverse document frequency (IDF) of terms.
@@ -92,8 +92,8 @@ impl<'a> Iterator for Lexer<'a> {
 /// Returns the total frequency of the term `t` in the document frequency index `d`.
 /// It sums up the term frequencies across all documents in the index.
 /// If the term is not found in a document, it contributes 0 to the sum.
-fn compute_tf(t: &str, d: &TermFreq) -> f32 {
-    d.get(t).cloned().unwrap_or(0) as f32 / d.iter().map(|(_, v)| *v).sum::<usize>() as f32
+fn compute_tf(t: &str, n: usize, d: &TermFreq) -> f32 {
+    d.get(t).cloned().unwrap_or(0) as f32 / n as f32
 }
 
 /// Returns the inverse document frequency (IDF) of the term `t` in the document frequency index `d`.
@@ -108,11 +108,11 @@ fn compute_idf(t: &str, n: usize, df: &DocFreq) -> f32 {
 
 pub fn search_query<'a>(model: &'a Model, query: &'a [char]) -> Vec<(&'a Path, f32)> {
     let mut results: Vec<(&Path, f32)> = Vec::new();
-    for (path, tf_table) in &model.tfpd {
+    for (path, (n, tf_table)) in &model.tfpd {
         let mut rank = 0.0;
         let tokens = Lexer::new(query).collect::<Vec<_>>();
         for token in tokens {
-            rank += compute_tf(&token, tf_table) * compute_idf(&token, model.tfpd.len(), &model.df);
+            rank += compute_tf(&token, *n, tf_table) * compute_idf(&token, model.tfpd.len(), &model.df);
         }
         results.push((path, rank));
     }
