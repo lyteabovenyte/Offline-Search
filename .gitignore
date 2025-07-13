@@ -239,3 +239,4 @@ index.json
 *.swn
 *.swa
 .DS_Store
+snowball/
