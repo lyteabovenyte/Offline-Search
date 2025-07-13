@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 
 /// TermFreq is the term to frequency table for each file.
 pub type TermFreq = HashMap<String, usize>;
@@ -20,7 +20,6 @@ pub struct Model {
     pub tfpd: TermFreqPerDoc,
     pub df: DocFreq,
 }
-
 
 pub struct Lexer<'a> {
     content: &'a [char],
@@ -93,7 +92,7 @@ impl<'a> Iterator for Lexer<'a> {
 /// Returns the total frequency of the term `t` in the document frequency index `d`.
 /// It sums up the term frequencies across all documents in the index.
 /// If the term is not found in a document, it contributes 0 to the sum.
-fn tf(t: &str, d: &TermFreq) -> f32 {
+fn compute_tf(t: &str, d: &TermFreq) -> f32 {
     d.get(t).cloned().unwrap_or(0) as f32 / d.iter().map(|(_, v)| *v).sum::<usize>() as f32
 }
 
@@ -101,9 +100,9 @@ fn tf(t: &str, d: &TermFreq) -> f32 {
 /// It calculates the logarithm of the ratio of the total number of documents to the number of documents containing the term.
 /// If the term is not found in any document, it returns 0.
 /// The IDF is a measure of how important a term is in the context of the entire document collection.
-fn idf(t: &str, d: &TermFreqPerDoc) -> f32 {
-    let n: f32 = d.len() as f32;
-    let m: f32 = 1f32 + d.values().filter(|tf| tf.contains_key(t)).count().max(1) as f32;
+fn compute_idf(t: &str, n: usize, df: &DocFreq) -> f32 {
+    let n: f32 = n as f32;
+    let m = df.get(t).cloned().unwrap_or(1) as f32;
     (n / m).log10()
 }
 
@@ -113,7 +112,7 @@ pub fn search_query<'a>(model: &'a Model, query: &'a [char]) -> Vec<(&'a Path, f
         let mut rank = 0.0;
         let tokens = Lexer::new(query).collect::<Vec<_>>();
         for token in tokens {
-            rank += tf(&token, tf_table) * idf(&token, &model.tfpd);
+            rank += compute_tf(&token, tf_table) * compute_idf(&token, model.tfpd.len(), &model.df);
         }
         results.push((path, rank));
     }

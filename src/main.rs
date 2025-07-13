@@ -1,11 +1,11 @@
 use std::env;
 use std::fs::{self, File};
+use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use std::process::ExitCode;
 use std::result::Result;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
-use std::io::{BufReader, BufWriter};
 
 mod model;
 use model::*;
@@ -100,6 +100,14 @@ fn add_folder_to_model(dir_path: &Path, model: &mut Model) -> Result<(), ()> {
 
         for token in Lexer::new(&content) {
             *tf.entry(token).or_insert(0) += 1;
+        }
+
+        for t in tf.keys() {
+            if let Some(freq) = model.df.get_mut(t) {
+                *freq += 1;
+            } else {
+                model.df.insert(t.to_string(), 1);
+            }
         }
 
         model.tfpd.insert(file_path, tf);
