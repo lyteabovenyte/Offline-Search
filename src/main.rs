@@ -53,7 +53,7 @@ fn check_index(index_path: &str) -> Result<(), ()> {
     Ok(())
 }
 
-fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {
+fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()> {  
     println!("🛟 Saving index at {index_path}");
     let index_file = File::create(index_path).map_err(|err| {
         eprintln!("ERROR: could not create the index file at {index_path}: {err}");
