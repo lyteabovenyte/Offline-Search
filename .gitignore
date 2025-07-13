@@ -239,4 +239,8 @@ index.json
 *.swn
 *.swa
 .DS_Store
-snowball/
+*.vscode
+.vscode
+.vs*/
+.vs*
+probe/
