@@ -34,7 +34,7 @@ impl<'a> Lexer<'a> {
     pub fn next_token(&mut self) -> Option<String> {
         self.trim_left();
         if self.content.is_empty() {
-            return None
+            return None;
         }
 
         if self.content[0].is_numeric() {
@@ -42,7 +42,11 @@ impl<'a> Lexer<'a> {
         }
 
         if self.content[0].is_alphabetic() {
-            let term = self.chop_while(|x| x.is_alphanumeric()).iter().map(|x| x.to_ascii_lowercase()).collect::<String>();
+            let term = self
+                .chop_while(|x| x.is_alphanumeric())
+                .iter()
+                .map(|x| x.to_ascii_lowercase())
+                .collect::<String>();
             let mut env = crate::snowball::SnowballEnv::create(&term);
             crate::snowball::algorithms::english_stemmer::stem(&mut env);
             let stemmed_term = env.get_current().to_string();

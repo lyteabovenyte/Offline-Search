@@ -3,6 +3,7 @@
 #![allow(unused_attributes)]
 #![allow(unused_associated_type_bounds)]
 #![allow(dead_code)]
+use model::*;
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
@@ -11,12 +12,11 @@ use std::process::ExitCode;
 use std::result::Result;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
-use model::*;
 
+mod lexer;
 mod model;
 mod server;
 mod snowball;
-mod lexer;
 
 fn parse_entire_txt_file(file_path: &Path) -> Result<String, ()> {
     fs::read_to_string(file_path).map_err(|err| {
@@ -51,18 +51,25 @@ fn parse_entire_xml_file(file_path: &Path) -> Result<String, ()> {
 }
 
 fn parse_entire_file_by_extension(file_path: &Path) -> Result<String, ()> {
-    let extension = file_path.extension().ok_or_else(|| {
-        eprintln!("ERROR: can't detect file type of {file_path} without extension",
-                  file_path = file_path.display());
-    })?.to_string_lossy();
+    let extension = file_path
+        .extension()
+        .ok_or_else(|| {
+            eprintln!(
+                "ERROR: can't detect file type of {file_path} without extension",
+                file_path = file_path.display()
+            );
+        })?
+        .to_string_lossy();
     match extension.as_ref() {
         "xhtml" | "xml" => parse_entire_xml_file(file_path),
         // TODO: specialized parser for markdown files
         "txt" | "md" => parse_entire_txt_file(file_path),
         _ => {
-            eprintln!("ERROR: can't detect file type of {file_path}: unsupported extension {extension}",
-                      file_path = file_path.display(),
-                      extension = extension);
+            eprintln!(
+                "ERROR: can't detect file type of {file_path}: unsupported extension {extension}",
+                file_path = file_path.display(),
+                extension = extension
+            );
             Err(())
         }
     }
@@ -95,7 +102,11 @@ fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()>
     Ok(())
 }
 
-fn add_folder_to_model(dir_path: &Path, model: &mut dyn Model, skipped: &mut usize) -> Result<(), ()> {
+fn add_folder_to_model(
+    dir_path: &Path,
+    model: &mut dyn Model,
+    skipped: &mut usize,
+) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
         eprintln!("ERROR: could not open directory {dir_path:?}: {err}");
     })?;
@@ -114,22 +125,45 @@ fn add_folder_to_model(dir_path: &Path, model: &mut dyn Model, skipped: &mut usi
             eprintln!("ERROR: could not determine the type of the file {file:?}: {err:?}");
         })?;
 
+        let last_modified = file
+            .metadata()
+            .map_err(|err| {
+                eprintln!(
+                    "ERROR: could not get metadata for file {file_path}: {err}",
+                    file_path = file_path.display()
+                );
+            })?
+            .modified()
+            .map_err(|err| {
+                eprintln!(
+                    "ERROR: could not get last modified time for file {file_path}: {err}",
+                    file_path = file_path.display()
+                );
+            })?;
+
         if file_type.is_dir() {
             add_folder_to_model(&file_path, model, skipped)?;
             continue 'next_file;
         }
+        if model.requires_reindexing(&file_path, last_modified)? {
+            
+            let content = match parse_entire_file_by_extension(&file_path) {
+                Ok(content) => content.chars().collect::<Vec<_>>(),
+                Err(()) => {
+                    *skipped += 1;
+                    continue 'next_file;
+                }
+            };
 
-        println!("⚒️ Indexing {file_path:?}");
-
-        let content = match parse_entire_file_by_extension(&file_path) {
-            Ok(content) => content.chars().collect::<Vec<_>>(),
-            Err(()) => {
-                *skipped += 1;
-                continue 'next_file
-            },
-        };
-
-        model.add_document(file_path, &content)?;
+            model.add_document(file_path, last_modified, &content)?;
+            println!("⚒️ Indexed.");
+        } else {
+            println!(
+                "💤 Ignoring {file_path}, ✔︎ Already Indexed.",
+                file_path = file_path.display()
+            );
+            *skipped += 1;
+        }
     }
     Ok(())
 }
@@ -169,6 +203,40 @@ fn entry() -> Result<(), ()> {
     })?;
 
     match subcommand.as_str() {
+        "now" => {
+            use std::time::SystemTime;
+            let now = SystemTime::now();
+            println!("{now:?}");
+            Ok(())
+        }
+
+        "reindex" => {
+            let dir_path = args.next().ok_or_else(|| {
+                eprintln!("ERROR: no directory is provided for the {subcommand} subcommand.");
+                usage(&program);
+            })?;
+
+            if use_sqlite_mode {
+                // TODO: Implement sqlite mode for reindexing.
+                todo!("Implement sqlite model for reindexing.")
+            } else {
+                let index_path = "index.json";
+                let index_file = File::open(index_path).map_err(|err| {
+                    eprintln!("ERROR: could not open index file {index_path}: {err}")
+                })?;
+                let mut model: InMemoryModel =
+                    serde_json::from_reader(index_file).map_err(|err| {
+                        eprintln!("ERROR: could not parse index file {index_path}: {err}");
+                    })?;
+                let mut skipped = 0;
+                println!("↪️ reIndexing directory: {dir_path}");
+                add_folder_to_model(Path::new(&dir_path), &mut model, &mut skipped)?;
+                save_model_as_json(&model, index_path)?;
+                println!("✅ reIndexing completed. Skipped {skipped} files.");
+            }
+            Ok(())
+        }
+
         "index" => {
             let dir_path = args.next().ok_or_else(|| {
                 eprintln!("ERROR: no directory is provided for the {subcommand} subcommand.");

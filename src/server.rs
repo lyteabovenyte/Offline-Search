@@ -112,9 +112,11 @@ pub fn start(address: &str, model: &impl Model) -> Result<(), ()> {
     println!("👂 INFO: Listening at http://{address}");
 
     for request in server.incoming_requests() {
-        serve_request(model, request).map_err(|err| {
-            eprintln!("ERROR: could not serve request: {err}");
-        }).ok();
+        serve_request(model, request)
+            .map_err(|err| {
+                eprintln!("ERROR: could not serve request: {err}");
+            })
+            .ok();
     }
 
     eprintln!("👋 INFO: Server stopped listening at http://{address}");

@@ -2,12 +2,23 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::result::Result;
+use std::time::SystemTime;
 
 use super::lexer::Lexer;
 
 pub trait Model {
     fn search_query(&self, query: &[char]) -> Result<Vec<(PathBuf, f32)>, ()>;
-    fn add_document(&mut self, path: PathBuf, content: &[char]) -> Result<(), ()>;
+    fn requires_reindexing(
+        &mut self,
+        file_path: &Path,
+        last_modified: SystemTime,
+    ) -> Result<bool, ()>;
+    fn add_document(
+        &mut self,
+        path: PathBuf,
+        last_modified: SystemTime,
+        content: &[char],
+    ) -> Result<(), ()>;
 }
 
 pub struct SqliteModel {
@@ -85,7 +96,21 @@ impl Model for SqliteModel {
         todo!("Implement search_query for SqliteModel");
     }
 
-    fn add_document(&mut self, path: PathBuf, content: &[char]) -> Result<(), ()> {
+    fn requires_reindexing(
+        &mut self,
+        _file_path: &Path,
+        _last_modified: SystemTime,
+    ) -> Result<bool, ()> {
+        // TODO: Implement this.
+        return Ok(true);
+    }
+
+    fn add_document(
+        &mut self,
+        path: PathBuf,
+        _last_modified: SystemTime,
+        content: &[char],
+    ) -> Result<(), ()> {
         let terms = Lexer::new(content).collect::<Vec<_>>();
         let doc_id = {
             let query = "INSERT INTO Documents (path, term_count) VALUES (:path, :term_count)";
@@ -206,16 +231,29 @@ pub type TermFreqPerDoc = HashMap<PathBuf, (usize, TermFreq)>;
 /// This is used in the search algorithm to determine the importance of a term across the entire index
 pub type DocFreq = HashMap<String, usize>;
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Doc {
     tf: TermFreq,
     count: usize,
+    last_modified: SystemTime,
 }
 type Docs = HashMap<PathBuf, Doc>;
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct InMemoryModel {
     docs: Docs,
     df: DocFreq,
+}
+
+impl InMemoryModel {
+    fn remove_document(&mut self, file_path: &Path) {
+        if let Some(doc) = self.docs.remove(file_path) {
+            for term in doc.tf.keys() {
+                if let Some(freq) = self.df.get_mut(term) {
+                    *freq -= 1;
+                }
+            }
+        }
+    }
 }
 
 impl Model for InMemoryModel {
@@ -225,8 +263,7 @@ impl Model for InMemoryModel {
         for (path, doc) in &self.docs {
             let mut rank = 0f32;
             for token in &tokens {
-                rank +=
-                    compute_tf(token, doc) * compute_idf(token, self.docs.len(), &self.df);
+                rank += compute_tf(token, doc) * compute_idf(token, self.docs.len(), &self.df);
             }
             result.push((path.clone(), rank));
         }
@@ -235,7 +272,31 @@ impl Model for InMemoryModel {
         Ok(result)
     }
 
-    fn add_document(&mut self, file_path: PathBuf, content: &[char]) -> Result<(), ()> {
+    fn requires_reindexing(
+        &mut self,
+        file_path: &Path,
+        last_modified: SystemTime,
+    ) -> Result<bool, ()> {
+        if let Some(doc) = self.docs.get(file_path) {
+            if doc.last_modified < last_modified {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    }
+
+    fn add_document(
+        &mut self,
+        file_path: PathBuf,
+        last_modified: SystemTime,
+        content: &[char],
+    ) -> Result<(), ()> {
+        eprintln!(
+            "⚠️ Document {} is modified, updating...",
+            file_path.display()
+        );
+        self.remove_document(file_path.as_path());
+
         let mut tf = TermFreq::new();
 
         let mut count = 0;
@@ -248,11 +309,17 @@ impl Model for InMemoryModel {
             *self.df.entry(t.clone()).or_insert(0) += 1;
         }
 
-        self.docs.insert(file_path, Doc {count, tf});
+        self.docs.insert(
+            file_path,
+            Doc {
+                count,
+                tf,
+                last_modified,
+            },
+        );
         Ok(())
     }
 }
-
 /// Returns the total frequency of the term `t` in the document frequency index `d`.
 /// It sums up the term frequencies across all documents in the index.
 /// If the term is not found in a document, it contributes 0 to the sum.
@@ -271,4 +338,3 @@ fn compute_idf(t: &str, n: usize, df: &DocFreq) -> f32 {
     let m = df.get(t).cloned().unwrap_or(1) as f32;
     (n / m).log10()
 }
-
