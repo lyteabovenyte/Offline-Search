@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::result::Result;
-use crate::snowball;
 
 use super::lexer::Lexer;
 
@@ -215,8 +214,8 @@ struct Doc {
 type Docs = HashMap<PathBuf, Doc>;
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct InMemoryModel {
-    pub docs: Docs,
-    pub df: DocFreq,
+    docs: Docs,
+    df: DocFreq,
 }
 
 impl Model for InMemoryModel {
