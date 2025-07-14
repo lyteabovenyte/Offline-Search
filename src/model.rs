@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::result::Result;
+use crate::snowball;
+
 use super::lexer::Lexer;
 
 pub trait Model {
