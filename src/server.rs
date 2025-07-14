@@ -56,7 +56,7 @@ fn serve_api_search(model: &impl Model, mut request: Request) -> io::Result<()> 
 
     let result = match model.search_query(&body) {
         Ok(result) => result,
-        Err(err) => {
+        Err(_err) => {
             return serve_500(request);
         }
     };

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::result::Result;
+use super::lexer::Lexer;
 
 pub trait Model {
     fn search_query(&self, query: &[char]) -> Result<Vec<(PathBuf, f32)>, ()>;
@@ -204,9 +205,15 @@ pub type TermFreqPerDoc = HashMap<PathBuf, (usize, TermFreq)>;
 /// This is used in the search algorithm to determine the importance of a term across the entire index
 pub type DocFreq = HashMap<String, usize>;
 
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct Doc {
+    tf: TermFreq,
+    count: usize,
+}
+type Docs = HashMap<PathBuf, Doc>;
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct InMemoryModel {
-    pub tfpd: TermFreqPerDoc,
+    pub docs: Docs,
     pub df: DocFreq,
 }
 
@@ -214,11 +221,11 @@ impl Model for InMemoryModel {
     fn search_query(&self, query: &[char]) -> Result<Vec<(PathBuf, f32)>, ()> {
         let mut result = Vec::new();
         let tokens = Lexer::new(query).collect::<Vec<_>>();
-        for (path, (n, tf_table)) in &self.tfpd {
+        for (path, doc) in &self.docs {
             let mut rank = 0f32;
             for token in &tokens {
                 rank +=
-                    compute_tf(token, *n, tf_table) * compute_idf(token, self.tfpd.len(), &self.df);
+                    compute_tf(token, doc) * compute_idf(token, self.docs.len(), &self.df);
             }
             result.push((path.clone(), rank));
         }
@@ -227,23 +234,20 @@ impl Model for InMemoryModel {
         Ok(result)
     }
 
-    fn add_document(&mut self, path: PathBuf, content: &[char]) -> Result<(), ()> {
+    fn add_document(&mut self, file_path: PathBuf, content: &[char]) -> Result<(), ()> {
         let mut tf = TermFreq::new();
-        let mut n = 0;
-        for token in Lexer::new(content) {
-            *tf.entry(token).or_insert(0) += 1;
-            n += 1;
+
+        let mut count = 0;
+        for term in Lexer::new(content) {
+            *tf.entry(term).or_insert(0) += 1;
+            count += 1;
         }
 
         for t in tf.keys() {
-            if let Some(freq) = self.df.get_mut(t) {
-                *freq += 1;
-            } else {
-                self.df.insert(t.to_string(), 1);
-            }
+            *self.df.entry(t.clone()).or_insert(0) += 1;
         }
 
-        self.tfpd.insert(path, (n, tf));
+        self.docs.insert(file_path, Doc {count, tf});
         Ok(())
     }
 }
@@ -251,8 +255,10 @@ impl Model for InMemoryModel {
 /// Returns the total frequency of the term `t` in the document frequency index `d`.
 /// It sums up the term frequencies across all documents in the index.
 /// If the term is not found in a document, it contributes 0 to the sum.
-fn compute_tf(t: &str, n: usize, d: &TermFreq) -> f32 {
-    d.get(t).cloned().unwrap_or(0) as f32 / n as f32
+fn compute_tf(t: &str, doc: &Doc) -> f32 {
+    let n = doc.count as f32;
+    let m = doc.tf.get(t).cloned().unwrap_or(0) as f32;
+    m / n
 }
 
 /// Returns the inverse document frequency (IDF) of the term `t` in the document frequency index `d`.
@@ -265,70 +271,3 @@ fn compute_idf(t: &str, n: usize, df: &DocFreq) -> f32 {
     (n / m).log10()
 }
 
-pub struct Lexer<'a> {
-    content: &'a [char],
-}
-
-impl<'a> Lexer<'a> {
-    pub fn new(content: &'a [char]) -> Self {
-        Self { content }
-    }
-
-    fn trim_left(&mut self) {
-        // This function trims the left side of the content until a non-whitespace character is found
-        while !self.content.is_empty() && self.content[0].is_whitespace() {
-            self.content = &self.content[1..];
-        }
-    }
-
-    fn chop(&mut self, n: usize) -> &'a [char] {
-        let token = &self.content[0..n];
-        self.content = &self.content[n..];
-        token
-    }
-
-    fn chop_while<P>(&mut self, mut predicate: P) -> &'a [char]
-    where
-        P: FnMut(&char) -> bool,
-    {
-        let mut n = 0;
-        while n < self.content.len() && predicate(&self.content[n]) {
-            n += 1;
-        }
-        self.chop(n)
-    }
-
-    pub fn next_token(&mut self) -> Option<String> {
-        self.trim_left();
-        if self.content.is_empty() {
-            return None;
-        }
-
-        if self.content[0].is_numeric() {
-            return Some(
-                self.chop_while(|x| x.is_numeric())
-                    .iter()
-                    .collect::<String>(),
-            );
-        }
-
-        if self.content[0].is_alphabetic() {
-            return Some(
-                self.chop_while(|x| x.is_alphanumeric())
-                    .iter()
-                    .map(|x| x.to_ascii_uppercase())
-                    .collect::<String>(),
-            );
-        }
-
-        Some(self.chop(1).iter().collect::<String>())
-    }
-}
-
-impl<'a> Iterator for Lexer<'a> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_token()
-    }
-}
