@@ -8,11 +8,7 @@ use super::lexer::Lexer;
 
 pub trait Model {
     fn search_query(&self, query: &[char]) -> Result<Vec<(PathBuf, f32)>, ()>;
-    fn requires_reindexing(
-        &mut self,
-        file_path: &Path,
-        last_modified: SystemTime,
-    ) -> Result<bool, ()>;
+    fn requires_reindexing(&mut self, file_path: &Path, last_modified: SystemTime) -> bool;
     fn add_document(
         &mut self,
         path: PathBuf,
@@ -96,13 +92,9 @@ impl Model for SqliteModel {
         todo!("Implement search_query for SqliteModel");
     }
 
-    fn requires_reindexing(
-        &mut self,
-        _file_path: &Path,
-        _last_modified: SystemTime,
-    ) -> Result<bool, ()> {
+    fn requires_reindexing(&mut self, _file_path: &Path, _last_modified: SystemTime) -> bool {
         // TODO: Implement this.
-        return Ok(true);
+        return true;
     }
 
     fn add_document(
@@ -272,19 +264,12 @@ impl Model for InMemoryModel {
         Ok(result)
     }
 
-    fn requires_reindexing(
-        &mut self,
-        file_path: &Path,
-        last_modified: SystemTime,
-    ) -> Result<bool, ()> {
+    fn requires_reindexing(&mut self, file_path: &Path, last_modified: SystemTime) -> bool {
         if let Some(doc) = self.docs.get(file_path) {
-            if doc.last_modified < last_modified {
-                return Ok(true);
-            }
+            return doc.last_modified < last_modified;
         }
-        return Ok(false);
+        return true;
     }
-
     fn add_document(
         &mut self,
         file_path: PathBuf,

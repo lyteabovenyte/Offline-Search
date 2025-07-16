@@ -150,7 +150,7 @@ fn add_folder_to_model(
             continue 'next_file;
         }
         let mut model = model.lock().unwrap();
-        if model.requires_reindexing(&file_path, last_modified)? {
+        if model.requires_reindexing(&file_path, last_modified) {
             let content = match parse_entire_file_by_extension(&file_path) {
                 Ok(content) => content.chars().collect::<Vec<_>>(),
                 Err(()) => {
@@ -161,12 +161,6 @@ fn add_folder_to_model(
 
             model.add_document(file_path, last_modified, &content)?;
             println!("⚒️ Indexed.");
-        } else {
-            println!(
-                "💤 Ignoring {file_path}, ✔︎ Already Indexed.",
-                file_path = file_path.display()
-            );
-            *skipped += 1;
         }
     }
     Ok(())
@@ -320,53 +314,51 @@ fn entry() -> Result<(), ()> {
         }
         */
         "serve" => {
-            let index_path = args.next().ok_or_else(|| {
+            assert!(!use_sqlite_mode);
+            let dir_path = args.next().ok_or_else(|| {
                 usage(&program);
                 eprintln!("ERROR: no path to index is provided for {subcommand} subcommand");
             })?;
 
+            // TODO: figure out the index_path based on dir_path.
+            let index_path = "index.json";
             let address = args.next().unwrap_or("127.0.0.1:6969".to_string());
-            if use_sqlite_mode {
-                let model = SqliteModel::open(Path::new(&index_path)).map_err(|err| {
-                    eprintln!("ERROR: could not open index file {index_path}: {err:?}");
-                })?;
-                server::start(&address, &model)
-            } else {
-                let exists = Path::new(&index_path).try_exists().map_err(|err| {
-                    eprintln!(
-                        "ERROR: could not ensure the existance of the {index_path}: {err}",
-                        index_path = index_path
-                    )
-                })?;
-                let model: Arc<Mutex<InMemoryModel>>;
-                if exists {
-                    let index_file = File::open(&index_path).map_err(|err| {
-                        eprintln!(
-                            "ERROR: could not open the file {index_path}: {err}",
-                            index_path = index_path
-                        );
-                    })?;
 
-                    model = Arc::new(Mutex::new(serde_json::from_reader(index_file).map_err(
-                        |err| {
-                            eprintln!("ERROR: could not parse index file {index_path}: {err}");
-                        },
-                    )?));
-                } else {
-                    model = Arc::new(Mutex::new(Default::default()));
-                }
+            let exists = Path::new(&index_path).try_exists().map_err(|err| {
+                eprintln!(
+                    "ERROR: could not ensure the existance of the {index_path}: {err}",
+                    index_path = index_path
+                )
+            })?;
+            let model: Arc<Mutex<InMemoryModel>>;
+            if exists {
+                let index_file = File::open(&index_path).map_err(|err| {
+                    eprintln!(
+                        "ERROR: could not open the file {index_path}: {err}",
+                        index_path = index_path
+                    );
+                })?;
+
+                model = Arc::new(Mutex::new(serde_json::from_reader(&index_file).map_err(
+                    |err| {
+                        eprintln!("ERROR: could not parse index file {index_path}: {err}");
+                    },
+                )?));
+            } else {
+                model = Arc::new(Mutex::new(Default::default()));
+            }
+            {
                 let model = Arc::clone(&model);
                 thread::spawn(move || {
                     let mut skipped = 0;
                     // TODO: what should be done here in case indexing thread crashes??
-                    add_folder_to_model(Path::new(&index_path), Arc::clone(&model), &mut skipped)
+                    add_folder_to_model(Path::new(&dir_path), Arc::clone(&model), &mut skipped)
                         .unwrap();
                     let model = model.lock().unwrap();
                     save_model_as_json(&model, &index_path).unwrap();
                 });
-                Ok(())
-                // server::start(&address, &model)
             }
+            server::start(&address, Arc::clone(&model))
         }
         _ => {
             println!("ERROR: unknown subcommand {subcommand}");
