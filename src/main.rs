@@ -10,9 +10,10 @@ use std::io::{BufReader, BufWriter};
 use std::path::Path;
 use std::process::ExitCode;
 use std::result::Result;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use xml::common::{Position, TextPosition};
 use xml::reader::{EventReader, XmlEvent};
-
 mod lexer;
 mod model;
 mod server;
@@ -26,7 +27,10 @@ fn parse_entire_txt_file(file_path: &Path) -> Result<String, ()> {
 
 fn parse_entire_xml_file(file_path: &Path) -> Result<String, ()> {
     let file = File::open(file_path).map_err(|err| {
-        eprintln!("ERROR: could not open {}: {err}", file_path.display());
+        eprintln!(
+            "ERROR: could not open file {file_path}: {err}",
+            file_path = file_path.display()
+        );
     })?;
     let er = EventReader::new(BufReader::new(file));
 
@@ -104,7 +108,7 @@ fn save_model_as_json(model: &InMemoryModel, index_path: &str) -> Result<(), ()>
 
 fn add_folder_to_model(
     dir_path: &Path,
-    model: &mut dyn Model,
+    model: Arc<Mutex<InMemoryModel>>,
     skipped: &mut usize,
 ) -> Result<(), ()> {
     let dir = fs::read_dir(dir_path).map_err(|err| {
@@ -142,11 +146,11 @@ fn add_folder_to_model(
             })?;
 
         if file_type.is_dir() {
-            add_folder_to_model(&file_path, model, skipped)?;
+            add_folder_to_model(&file_path, Arc::clone(&model), skipped)?;
             continue 'next_file;
         }
+        let mut model = model.lock().unwrap();
         if model.requires_reindexing(&file_path, last_modified)? {
-            
             let content = match parse_entire_file_by_extension(&file_path) {
                 Ok(content) => content.chars().collect::<Vec<_>>(),
                 Err(()) => {
@@ -203,6 +207,7 @@ fn entry() -> Result<(), ()> {
     })?;
 
     match subcommand.as_str() {
+        /*
         "now" => {
             use std::time::SystemTime;
             let now = SystemTime::now();
@@ -230,7 +235,7 @@ fn entry() -> Result<(), ()> {
                     })?;
                 let mut skipped = 0;
                 println!("↪️ reIndexing directory: {dir_path}");
-                add_folder_to_model(Path::new(&dir_path), &mut model, &mut skipped)?;
+                add_folder_to_model(Path::new(&dir_path), model, &mut skipped)?;
                 save_model_as_json(&model, index_path)?;
                 println!("✅ reIndexing completed. Skipped {skipped} files.");
             }
@@ -256,17 +261,18 @@ fn entry() -> Result<(), ()> {
                 }
                 println!("✅ Removed existing index file {index_path}");
 
-                let mut model = SqliteModel::open(Path::new(index_path))?;
-                println!("📂 Indexing directory: {dir_path}");
+                let mut model = Arc::new(Mutex::new(Default::default()));
+                // TODO: thing a way through adding Arc<Mutex>> to the sqlite model
+                //let mut model = Arc::new(Mutex::new(SqliteModel))
+                //println!("📂 Indexing directory: {dir_path}");
                 model.begin()?;
                 // TODO: implement a special transaction object that implements Drop trait and commits the transaction when it goes out of scope
-                add_folder_to_model(Path::new(&dir_path), &mut model, &mut skipped)?;
+                add_folder_to_model(Path::new(&dir_path), model, &mut skipped)?;
                 model.commit()?;
             } else {
                 let index_path = "index.json";
-                let mut model = Default::default();
-                println!("📂 Indexing directory: {dir_path}");
-                add_folder_to_model(Path::new(&dir_path), &mut model, &mut skipped)?;
+                let model = Arc::new(Mutex::new(Default::default()));
+                add_folder_to_model(Path::new(&dir_path), model, &mut skipped)?;
                 save_model_as_json(&model, index_path)?;
             }
             println!(
@@ -312,6 +318,7 @@ fn entry() -> Result<(), ()> {
             println!("✅ Search completed.");
             Ok(())
         }
+        */
         "serve" => {
             let index_path = args.next().ok_or_else(|| {
                 usage(&program);
@@ -325,14 +332,40 @@ fn entry() -> Result<(), ()> {
                 })?;
                 server::start(&address, &model)
             } else {
-                let index_file = File::open(&index_path).map_err(|err| {
-                    eprintln!("ERROR: could not open index file {index_path}: {err}");
+                let exists = Path::new(&index_path).try_exists().map_err(|err| {
+                    eprintln!(
+                        "ERROR: could not ensure the existance of the {index_path}: {err}",
+                        index_path = index_path
+                    )
                 })?;
-                // TODO: should we use BufReader here?
-                let model: InMemoryModel = serde_json::from_reader(index_file).map_err(|err| {
-                    eprintln!("ERROR: could not parse index file {index_path}: {err}");
-                })?;
-                server::start(&address, &model)
+                let model: Arc<Mutex<InMemoryModel>>;
+                if exists {
+                    let index_file = File::open(&index_path).map_err(|err| {
+                        eprintln!(
+                            "ERROR: could not open the file {index_path}: {err}",
+                            index_path = index_path
+                        );
+                    })?;
+
+                    model = Arc::new(Mutex::new(serde_json::from_reader(index_file).map_err(
+                        |err| {
+                            eprintln!("ERROR: could not parse index file {index_path}: {err}");
+                        },
+                    )?));
+                } else {
+                    model = Arc::new(Mutex::new(Default::default()));
+                }
+                let model = Arc::clone(&model);
+                thread::spawn(move || {
+                    let mut skipped = 0;
+                    // TODO: what should be done here in case indexing thread crashes??
+                    add_folder_to_model(Path::new(&index_path), Arc::clone(&model), &mut skipped)
+                        .unwrap();
+                    let model = model.lock().unwrap();
+                    save_model_as_json(&model, &index_path).unwrap();
+                });
+                Ok(())
+                // server::start(&address, &model)
             }
         }
         _ => {
