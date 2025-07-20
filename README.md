@@ -41,7 +41,7 @@ In many parts of the world, like Iran, internet access is often disrupted, leavi
 - Cargo (Rust's package manager)
 - A local directory containing documents (HTML, XHTML, PDF, or text files)
 
-#### Installation
+#### Usage
 
 1. Clone the Repository:
 
@@ -51,30 +51,12 @@ git clone https://github.com/lyteabovenyte/offline-search.git
 cd offline-search
 ```
 
-
-1. Index Document:
-
+2. Serve the directory:
 ```bash
-cargo run --release index [--sqlite] </path/to/your/documents/>
+cargo run serve [address(default: localhost:6969)] ./your_directory/ 
 ```
 
-
-3. Serve OfflineSearch Locally:
-
-```bash
-cargo run --release serve [address] </path/to/your/indexed/file> # for local index.json files
-cargo run --release serve --sqlite [address] </path/to/your/sqlite/database/file> # from sqlite database
-```
-
-
-4. Search Your Collection via CLI:
-
-```bash
-cargo run --release search "your query here"
-```
-
-5. Search Your Collection via Browser.
-
+It'll start indexing the directory in the background on other thread and you can start searching via the web browser while indexing.
 
 <br />
 <div align="center"><h3>How It Works</h3></div>
